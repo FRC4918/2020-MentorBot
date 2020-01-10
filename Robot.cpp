@@ -234,15 +234,18 @@ class Robot : public frc::TimedRobot {
 
    void TeleopPeriodic() override {
 
-      static int  iCallCount = 0;
 
       GetAllVariables();  // this is necessary if we use any
                           // of the Canbus variables.
 
 #ifdef JAGNOTDEFINED
-      if ( 0 == iCallCount%1000 )  {
-         cout << "joy: " << m_stick.GetX() << "/" << m_stick.GetY();
-         cout << endl;
+      {
+         static int  iCallCount = 0;
+         if ( 0 == iCallCount%1000 )  {
+            cout << "joy: " << m_stick.GetX() << "/" << m_stick.GetY();
+            cout << endl;
+         }
+         iCallCount++;
       }
 #endif
 
