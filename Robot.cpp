@@ -92,8 +92,7 @@ class Robot : public frc::TimedRobot {
 #if 0        
          if (10 < limea ) {
             autoDriveSpeed = -0.1;
-         }
-          else if ( 7 < limea )  {         // if we're really close...
+         } else if ( 7 < limea )  {         // if we're really close...
             autoDriveSpeed = 0.0;   //   go slow
          } else if ( 5 < limea ) {   // if we're a little farther...
             autoDriveSpeed = 0.1;   //   go a little faster
@@ -103,17 +102,16 @@ class Robot : public frc::TimedRobot {
             autoDriveSpeed = 0.20;   //   go as fast as we dare
          }
 #else          
-          if      (15 < limey ) {
+         if        ( 15 < limey ) {
             autoDriveSpeed = -0.1;
-         }
-          else if ( 12 < limey )  {         // if we're really close...
-            autoDriveSpeed = 0.0;   //   go slow
-         } else if ( 8 < limey ) {   // if we're a little farther...
-            autoDriveSpeed = 0.1;   //   go a little faster
-         } else if ( 2 < limey ) {   // if we're farther still...
-            autoDriveSpeed = 0.15;   //   go a little faster still
+         } else if ( 12 < limey ) {   // if we're really close...
+            autoDriveSpeed = 0.0;     //   go slow
+         } else if (  8 < limey ) {   // if we're a little farther...
+            autoDriveSpeed = 0.1;     //   go a little faster
+         } else if (  2 < limey ) {   // if we're farther still...
+            autoDriveSpeed = 0.15;    //   go a little faster still
          } else {                     // else we must be really far...
-            autoDriveSpeed = 0.20;   //   go as fast as we dare
+            autoDriveSpeed = 0.20;    //   go as fast as we dare
          }
 #endif         
                           // LATER: May want to modify autoDriveSpeed depending
