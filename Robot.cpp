@@ -89,7 +89,11 @@ class Robot : public frc::TimedRobot {
          double autoDriveSpeed;
              // limea is the area of the target seen by the limelight camera
              // and is in percent (between 0 and 100) of the whole screen area.
-         if ( 7 < limea )  {         // if we're really close...
+#if 0        
+         if (10 < limea ) {
+            autoDriveSpeed = -0.1;
+         }
+          else if ( 7 < limea )  {         // if we're really close...
             autoDriveSpeed = 0.0;   //   go slow
          } else if ( 5 < limea ) {   // if we're a little farther...
             autoDriveSpeed = 0.1;   //   go a little faster
@@ -98,6 +102,20 @@ class Robot : public frc::TimedRobot {
          } else {                     // else we must be really far...
             autoDriveSpeed = 0.20;   //   go as fast as we dare
          }
+#else          
+          if      (15 < limey ) {
+            autoDriveSpeed = -0.1;
+         }
+          else if ( 12 < limey )  {         // if we're really close...
+            autoDriveSpeed = 0.0;   //   go slow
+         } else if ( 8 < limey ) {   // if we're a little farther...
+            autoDriveSpeed = 0.1;   //   go a little faster
+         } else if ( 2 < limey ) {   // if we're farther still...
+            autoDriveSpeed = 0.15;   //   go a little faster still
+         } else {                     // else we must be really far...
+            autoDriveSpeed = 0.20;   //   go as fast as we dare
+         }
+#endif         
                           // LATER: May want to modify autoDriveSpeed depending
                           // on the distance from the target determined
                           // by sonar transducers.
@@ -152,6 +170,7 @@ class Robot : public frc::TimedRobot {
           */
                                     // inverts encoder value positive/negative
       m_motorLSMaster.SetSensorPhase(true);
+      // m_motorRSMaster.SetSensorPhase(false);
 
                        /* Set relevant frame periods to be at least as fast */
                        /* as the periodic rate.                             */
@@ -166,6 +185,15 @@ class Robot : public frc::TimedRobot {
       m_motorLSMaster.ConfigPeakOutputForward(    1, 10 );
       m_motorLSMaster.ConfigPeakOutputReverse(   -1, 10 );
 
+      m_motorLSMaster.ConfigPeakCurrentLimit(40);
+      m_motorLSMaster.ConfigPeakCurrentDuration(100);
+      m_motorLSMaster.ConfigContinuousCurrentLimit(40);
+      m_motorLSMaster.EnableCurrentLimit(true);
+      m_motorRSMaster.ConfigPeakCurrentLimit(40);
+      m_motorRSMaster.ConfigPeakCurrentDuration(100);
+      m_motorRSMaster.ConfigContinuousCurrentLimit(40);
+      m_motorRSMaster.EnableCurrentLimit(true);
+
          /* Set Motion Magic gains in slot0 - see documentation */
       m_motorLSMaster.SelectProfileSlot( 0, 0 );
       m_motorLSMaster.Config_kF( 0, 0.3, 10 );
@@ -176,6 +204,11 @@ class Robot : public frc::TimedRobot {
          /* Set acceleration and cruise velocity - see documentation */
       m_motorLSMaster.ConfigMotionCruiseVelocity( 1500, 10 );
       m_motorLSMaster.ConfigMotionAcceleration(   1500, 10 );
+
+      m_motorLSMaster.ConfigClosedloopRamp(0.0);
+      m_motorLSMaster.ConfigOpenloopRamp(  0.0);
+      m_motorRSMaster.ConfigClosedloopRamp(0.0);
+      m_motorRSMaster.ConfigOpenloopRamp(  0.0);
    }
 
    void AutonomousInit() override {
@@ -238,12 +271,25 @@ class Robot : public frc::TimedRobot {
       GetAllVariables();  // this is necessary if we use any
                           // of the Canbus variables.
 
-#ifdef JAGNOTDEFINED
+#ifndef JAGNOTDEFINED
       {
          static int  iCallCount = 0;
-         if ( 0 == iCallCount%1000 )  {
+         if ( 0 == iCallCount%1000000 )  {   // every 2 seconds
             cout << "joy: " << m_stick.GetX() << "/" << m_stick.GetY();
             cout << endl;
+            cout << "LSMotor: vel/pos/%: ";
+            cout << m_motorLSMaster.GetSelectedSensorVelocity() << "/";
+            cout << m_motorLSMaster.GetSelectedSensorPosition() << "/";
+            cout << m_motorLSMaster.GetMotorOutputPercent() << "% ";
+            cout << m_motorLSMaster.GetOutputCurrent();
+            cout << endl;
+            cout << "RSMotor: vel/pos/%: ";
+            cout << m_motorRSMaster.GetSelectedSensorVelocity() << "/";
+            cout << m_motorRSMaster.GetSelectedSensorPosition() << "/";
+            cout << m_motorRSMaster.GetMotorOutputPercent() << "% ";
+            cout << m_motorRSMaster.GetOutputCurrent();
+            cout << endl;
+            // max free speed for MinCims is about 6200
          }
          iCallCount++;
       }
@@ -256,6 +302,15 @@ class Robot : public frc::TimedRobot {
          ( 1  == limev )                 ) {    // "drivetotarget" button and
                                                 // the limelight has a target,
          DriveToTarget();        // then autonomously drive towards the target
+      } else if ( m_stick.GetRawButton(1) ) {
+         /* button 1 is the trigger button (on the front of the joystick)   */
+         /* If button 1 pressed, assume 775Pro motors instead of mimi-CIM,  */
+         /* and drive the motors directly instead, with Percent Output.     */
+         m_drive.StopMotor();
+         m_motorLSMaster.Set( ControlMode::PercentOutput,
+                              -m_stick.GetY() );
+         m_motorRSMaster.Set( ControlMode::PercentOutput,
+                              -m_stick.GetX() );
       } else { 
  
                                     /* Drive the robot according to the     */
