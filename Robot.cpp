@@ -171,8 +171,10 @@ class Robot : public frc::TimedRobot {
           * (Green LED)
           */
                                     // inverts encoder value positive/negative
-      m_motorLSMaster.SetSensorPhase(false);
-      m_motorRSMaster.SetSensorPhase(false);
+      m_motorLSMaster.SetSensorPhase(true);
+      m_motorRSMaster.SetSensorPhase(true);
+      // m_motorLSMaster.SetInverted(false);
+      // m_motorRSMaster.SetInverted(false);
 
                        /* Set relevant frame periods to be at least as fast */
                        /* as the periodic rate.                             */
@@ -196,25 +198,25 @@ class Robot : public frc::TimedRobot {
       m_motorRSMaster.ConfigPeakOutputReverse(   -1, 10 );
 
       m_motorLSMaster.ConfigPeakCurrentLimit(40);
-      m_motorLSMaster.ConfigPeakCurrentDuration(100);
+      m_motorLSMaster.ConfigPeakCurrentDuration(10);
       m_motorLSMaster.ConfigContinuousCurrentLimit(40);
       m_motorLSMaster.EnableCurrentLimit(true);
       m_motorRSMaster.ConfigPeakCurrentLimit(40);
-      m_motorRSMaster.ConfigPeakCurrentDuration(100);
+      m_motorRSMaster.ConfigPeakCurrentDuration(10);
       m_motorRSMaster.ConfigContinuousCurrentLimit(40);
       m_motorRSMaster.EnableCurrentLimit(true);
 
          /* Set Motion Magic gains in slot0 - see documentation */
       m_motorLSMaster.SelectProfileSlot( 0, 0 );
-      m_motorLSMaster.Config_kF( 0, 0.01, 10 );
-      m_motorLSMaster.Config_kP( 0, 0.08, 10 );
-      m_motorLSMaster.Config_kI( 0, 0.00008, 10 );
-      m_motorLSMaster.Config_kD( 0, 0.8, 10 );
+      m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
+      m_motorLSMaster.Config_kP( 0, 0.2, 10 );   // 0.08 for shooter (775 at 5:1)
+      m_motorLSMaster.Config_kI( 0, 0.0002, 10 ); // 0.00008 for shooter (775 at 5:1)
+      m_motorLSMaster.Config_kD( 0, 10.0, 10 );    // 0.8 for shooter (775 at 5:1)
       m_motorRSMaster.SelectProfileSlot( 0, 0 );
-      m_motorRSMaster.Config_kF( 0, 0.01, 10 );
-      m_motorRSMaster.Config_kP( 0, 0.08, 10 );
-      m_motorRSMaster.Config_kI( 0, 0.00008, 10 );
-      m_motorRSMaster.Config_kD( 0, 0.8, 10 );
+      m_motorRSMaster.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 3:1)
+      m_motorRSMaster.Config_kP( 0, 0.2, 10 );   // 0.08 for shooter (775 at 3:1)
+      m_motorRSMaster.Config_kI( 0, 0.0002, 10 ); // 0.00008 for shooter (775 at 3:1)
+      m_motorRSMaster.Config_kD( 0, 10.0, 10 );    // 0.8 for shooter (775 at 3:1)
 
          /* Set acceleration and cruise velocity - see documentation */
       m_motorLSMaster.ConfigMotionCruiseVelocity( 1500, 10 );
@@ -315,36 +317,36 @@ class Robot : public frc::TimedRobot {
 
          if ( 0 == iCallCount%100 )  {   // every 2 seconds
             if ( 0.5 < m_stick.GetY() &&
-                 LStargetVelocity_UnitsPer100ms < 100000.0 * 4096 / 600 ) {
-               LStargetVelocity_UnitsPer100ms += 1000.0 * 4096 / 600;
+                 LStargetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
+               LStargetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
             } else if ( m_stick.GetY() < -0.5 &&
-                        -100000.0 * 4096 / 600 < LStargetVelocity_UnitsPer100ms ) {
-               LStargetVelocity_UnitsPer100ms -= 1000.0 * 4096 / 600;
+                        -790.0 * 4096 / 600 < LStargetVelocity_UnitsPer100ms ) {
+               LStargetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
             }
             if ( 0.5 < m_stick.GetX() &&
-                 RStargetVelocity_UnitsPer100ms < 60000.0 * 4096 / 600 ) {
-               RStargetVelocity_UnitsPer100ms += 600.0 * 4096 / 600;
+                 RStargetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
+               RStargetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
             } else if ( m_stick.GetX() < -0.5 && 
-                        -60000.0 * 4096 / 600 < RStargetVelocity_UnitsPer100ms ) {
-               RStargetVelocity_UnitsPer100ms -= 600.0 * 4096 / 600;
+                        -790.0 * 4096 / 600 < RStargetVelocity_UnitsPer100ms ) {
+               RStargetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
             }
             cout << "joy: " << m_stick.GetY() << "/" << m_stick.GetX();
             cout << endl;
-            cout << "LSMotor: vel/min:max/% A: ";
-            cout << m_motorLSMaster.GetSelectedSensorVelocity()*600/4096/5 << "/";
-            cout << LSsensorVmin*600/4096/5 << ":" << LSsensorVmax*600/4096/5 << "/";
-            cout << LStargetVelocity_UnitsPer100ms*600/4096/5 << " ";
+            cout << "LSMotor: vel/min:max/tgt % A: ";
+            cout << m_motorLSMaster.GetSelectedSensorVelocity()*600/4096 << "/";
+            cout << LSsensorVmin*600/4096 << ":" << LSsensorVmax*600/4096 << "/";
+            cout << LStargetVelocity_UnitsPer100ms*600/4096 << " ";
             // cout << m_motorLSMaster.GetSelectedSensorPosition() << "/";
             cout << m_motorLSMaster.GetMotorOutputPercent() << "% ";
-            cout << m_motorLSMaster.GetOutputCurrent();
+            cout << m_motorLSMaster.GetStatorCurrent();
             cout << endl;
-            cout << "RSMotor: vel/min:max/% A: ";
-            cout << m_motorRSMaster.GetSelectedSensorVelocity()*600/4096/3 << "/";
-            cout << RSsensorVmin*600/4096/3 << ":" << RSsensorVmax*600/4096/3 << "/";
-            cout << RStargetVelocity_UnitsPer100ms*600/4096/3 << " ";
+            cout << "RSMotor: vel/min:max/tgt % A: ";
+            cout << m_motorRSMaster.GetSelectedSensorVelocity()*600/4096 << "/";
+            cout << RSsensorVmin*600/4096 << ":" << RSsensorVmax*600/4096 << "/";
+            cout << RStargetVelocity_UnitsPer100ms*600/4096 << " ";
             // cout << m_motorRSMaster.GetSelectedSensorPosition() << "/";
             cout << m_motorRSMaster.GetMotorOutputPercent() << "% ";
-            cout << m_motorRSMaster.GetOutputCurrent();
+            cout << m_motorRSMaster.GetStatorCurrent();
             cout << endl;
             // max free speed for MinCims is about 6200
 
@@ -358,11 +360,13 @@ class Robot : public frc::TimedRobot {
 
                                        /* This is an example of how to read */
                                        /* a button on the joystick.         */
+                                       /* Button 3 is the topmost center    */
+                                       /* button on the back of joystick.   */
       if ( ( m_stick.GetRawButton(3) ) &&       // If driver is pressing the
          ( 1  == limev )                 ) {    // "drivetotarget" button and
                                                 // the limelight has a target,
          DriveToTarget();        // then autonomously drive towards the target
-      } else if ( m_stick.GetRawButton(1) ) {
+      } else if ( m_stick.GetRawButton(1) ) {  // button 1 is the joystick trigger
          /* button 1 is the trigger button (on the front of the joystick)   */
          /* If button 1 pressed, assume 775Pro motors instead of mimi-CIM,  */
          /* and drive the motors directly instead, with Percent Output.     */
@@ -391,12 +395,12 @@ class Robot : public frc::TimedRobot {
 			/* 500 RPM in either direction */
          // LStargetVelocity_UnitsPer100ms = 0;
          // RStargetVelocity_UnitsPer100ms = 0;
-         if ( m_console.GetRawButton(9) ){
+         if ( m_console.GetRawButton(9) ){    // second-from-leftmost missile switch
             m_motorLSMaster.Set(ControlMode::Velocity, 
                                  LStargetVelocity_UnitsPer100ms);
             m_motorRSMaster.Set(ControlMode::Velocity, 
                                  RStargetVelocity_UnitsPer100ms);
-         } else if ( m_console.GetRawButton(12) ) {
+         } else if ( m_console.GetRawButton(12) ) {  // leftmost missile switch
         	   m_motorLSMaster.Set(ControlMode::Velocity,
                m_motorLSMaster.GetSelectedSensorVelocity() +
                   0.2 * ( LStargetVelocity_UnitsPer100ms -
@@ -423,8 +427,8 @@ class Robot : public frc::TimedRobot {
  private:
 
          // Note for future: Need to add a gyro here.
-   WPI_TalonSRX m_motorRSMaster{   9 };   // 8 Right side drive motor
-   WPI_TalonSRX m_motorLSMaster{   2 };   // 0 Left  side drive motor   
+   WPI_TalonSRX m_motorRSMaster{   8 };   // 9 Right side drive motor
+   WPI_TalonSRX m_motorLSMaster{   0 };   // 2 Left  side drive motor   
    WPI_VictorSPX m_motorRSSlave1{  1 };   // Right side slave motor
    WPI_VictorSPX m_motorLSSlave1{ 14 };   // Left  side slave motor
    int iAutoCount;
