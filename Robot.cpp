@@ -8,6 +8,7 @@
 // #include <frc/WPILib.h>  // uncomment to include everything
 #include "ctre/Phoenix.h"
 #include "frc/AnalogInput.h"
+#include "frc/BuiltInAccelerometer.h"
 #include "frc/Compressor.h"
 #include "frc/DigitalInput.h"
 #include "frc/DigitalOutput.h"
@@ -158,10 +159,21 @@ class Robot : public frc::TimedRobot {
       m_motorRSSlave1.Follow(m_motorRSMaster);
 
           /* Configure Sensor Source for Primary PID */
+          /* Config to stop motor immediately when limit switch is closed. */
       m_motorLSMaster.ConfigSelectedFeedbackSensor(
                             FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 );
+      m_motorLSMaster.ConfigForwardLimitSwitchSource(LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
+                           LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
+      m_motorLSMaster.ConfigReverseLimitSwitchSource(LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
+                           LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
+      m_motorLSMaster.OverrideLimitSwitchesEnable(true);
       m_motorRSMaster.ConfigSelectedFeedbackSensor(
                             FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 );
+      m_motorRSMaster.ConfigForwardLimitSwitchSource(LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
+                           LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
+      m_motorRSMaster.ConfigReverseLimitSwitchSource(LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
+                           LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
+      m_motorRSMaster.OverrideLimitSwitchesEnable(true);
 
          /*
           * Configure Talon SRX Output and Sensor direction.
@@ -349,6 +361,9 @@ class Robot : public frc::TimedRobot {
             cout << m_motorRSMaster.GetStatorCurrent();
             cout << endl;
             // max free speed for MinCims is about 6200
+            cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
+            cout << RoborioAccel.GetY() << "/";
+            cout << RoborioAccel.GetZ() << endl;
 
             LSsensorVmin = LSsensorVmax = m_motorLSMaster.GetSelectedSensorVelocity();
             RSsensorVmin = RSsensorVmax = m_motorRSMaster.GetSelectedSensorVelocity();
@@ -362,11 +377,11 @@ class Robot : public frc::TimedRobot {
                                        /* a button on the joystick.         */
                                        /* Button 3 is the topmost center    */
                                        /* button on the back of joystick.   */
-      if ( ( m_stick.GetRawButton(3) ) &&       // If driver is pressing the
+      if ( ( m_stick.GetRawButton(1) ) &&       // If driver is pressing the
          ( 1  == limev )                 ) {    // "drivetotarget" button and
                                                 // the limelight has a target,
          DriveToTarget();        // then autonomously drive towards the target
-      } else if ( m_stick.GetRawButton(1) ) {  // button 1 is the joystick trigger
+      } else if ( m_stick.GetRawButton(3) ) {  // button 1 is the joystick trigger
          /* button 1 is the trigger button (on the front of the joystick)   */
          /* If button 1 pressed, assume 775Pro motors instead of mimi-CIM,  */
          /* and drive the motors directly instead, with Percent Output.     */
@@ -381,7 +396,7 @@ class Robot : public frc::TimedRobot {
                                     /* commanded Y and X joystick position. */
                                     /* See AutonomousInit() for examples of */
                                     /* other ways we could drive the robot. */
-#if 0
+#if 1
          m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
 #else
          m_drive.StopMotor();
@@ -438,6 +453,7 @@ class Robot : public frc::TimedRobot {
    frc::DifferentialDrive m_drive{ m_motorLSMaster, m_motorRSMaster };
    //frc::PowerDistributionPanel pdp{0};
     frc::AnalogInput DistSensor1{0};
+   frc::BuiltInAccelerometer RoborioAccel{};
 
     std::shared_ptr<NetworkTable> limenttable =
                nt::NetworkTableInstance::GetDefault().GetTable( "limelight" );
