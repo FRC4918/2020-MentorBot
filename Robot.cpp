@@ -329,12 +329,16 @@ class Robot : public frc::TimedRobot {
    }
 
    void AutonomousInit() override {
+      cout << "shoot 3 balls" << endl;
+      m_drive.StopMotor();
+      iCallCount=0;
       m_motorLSSlave1.Follow(m_motorLSMaster);
       m_motorRSSlave1.Follow(m_motorRSMaster);
    }
 
    void AutonomousPeriodic() override {
 
+#ifdef JAG_NOTDEFINED
       GetAllVariables();
                                        /* This is an example of how to read */
                                        /* a button on the joystick.         */
@@ -373,6 +377,35 @@ class Robot : public frc::TimedRobot {
          //   m_drive.CurvatureDrive( GetSimY(),
          //           m_xbox.GetX( frc::GenericHID::kLeftHand ),
          //           m_xbox.GetBumperPressed( frc::GenericHID::kRightHand ) );
+         #endif
+
+         iCallCount++;
+         static double LStargetVelocity_UnitsPer100ms = 0; // Left Side drive
+         static double RStargetVelocity_UnitsPer100ms = 0; // Right Side drive
+
+         LStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+         RStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+         if (iCallCount<50) {
+            LStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+            RStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+         } else if (iCallCount<100) {
+            LStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+            RStargetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+         } else if (iCallCount<150) {
+            LStargetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+            RStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+         } else if (iCallCount<200) {
+            LStargetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+            RStargetVelocity_UnitsPer100ms =-150.0 * 4096 / 600;
+         } else {
+            LStargetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+            RStargetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+         }
+
+         m_motorLSMaster.Set( ControlMode::Velocity, 
+                              LStargetVelocity_UnitsPer100ms);
+         m_motorRSMaster.Set( ControlMode::Velocity, 
+                              RStargetVelocity_UnitsPer100ms);
    }
 
    void TeleopInit() override {
@@ -452,11 +485,11 @@ class Robot : public frc::TimedRobot {
       }
       if (  ( 0.5 < sCurrState.conX ) &&     // if console "joystick" is
            !( 0.5 < sPrevState.conX ) &&     // newly-pressed to right
-           BStargetVelocity_UnitsPer100ms < 3000.0 * 4096 / 600 ) {
+           BStargetVelocity_UnitsPer100ms < 5000.0 * 4096 / 600 ) {
          BStargetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
       } else if (  ( sCurrState.conX < -0.5 ) &&  // else if newly-pressed
                   !( sPrevState.conX < -0.5 ) &&  // to the left
-                  -3000.0 * 4096 / 600 < BStargetVelocity_UnitsPer100ms ) {
+                  -5000.0 * 4096 / 600 < BStargetVelocity_UnitsPer100ms ) {
          BStargetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
       }
 
@@ -525,11 +558,16 @@ class Robot : public frc::TimedRobot {
          /* and drive the motors directly instead, with Percent Output.     */
          if ( !sPrevState.joyButton[3] ) {  // if button has just been pressed
             m_drive.StopMotor();
+                                // Set current sensor positions to zero
+            m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
+            m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
          }
-         m_motorLSMaster.Set( ControlMode::PercentOutput,
-                              -m_stick.GetY() );
-         m_motorRSMaster.Set( ControlMode::PercentOutput,
-                              -m_stick.GetX() );
+         m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
+         m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
+         // m_motorLSMaster.Set( ControlMode::PercentOutput,
+         //                      -m_stick.GetY() );
+         // m_motorRSMaster.Set( ControlMode::PercentOutput,
+         //                      -m_stick.GetX() );
                                      /* Button 2 is the bottom-most center  */
                                      /* button on the back of the joystick. */
       } else if ( sCurrState.joyButton[2] ) {
