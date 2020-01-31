@@ -38,6 +38,11 @@ using std::endl;
 class Robot : public frc::TimedRobot {
  private:
 
+   struct sMotorState {
+      double targetVelocity_UnitsPer100ms;
+      double sensorVmax, sensorVmin;
+   };
+
    static void VisionThread() {
 
          // This function executes as a separate thread, to take 640x480 pixel
@@ -104,33 +109,19 @@ class Robot : public frc::TimedRobot {
          double autoDriveSpeed;
              // limea is the area of the target seen by the limelight camera
              // and is in percent (between 0 and 100) of the whole screen area.
-#if 0        
-         if (10 < limea ) {
+             // limey is the height above the center of the field of view
+         if        ( 15 < limey ) {
             autoDriveSpeed = -0.1;
-         }
-          else if ( 7 < limea )  {         // if we're really close...
-            autoDriveSpeed = 0.0;   //   go slow
-         } else if ( 5 < limea ) {   // if we're a little farther...
-            autoDriveSpeed = 0.1;   //   go a little faster
-         } else if ( 2 < limea ) {   // if we're farther still...
+         } else if ( 12 < limey )  { // if we're really close...
+            autoDriveSpeed = 0.0;    //   go slow
+         } else if (  8 < limey ) {  // if we're a little farther...
+            autoDriveSpeed = 0.1;    //   go a little faster
+         } else if (  2 < limey ) {  // if we're farther still...
             autoDriveSpeed = 0.15;   //   go a little faster still
-         } else {                     // else we must be really far...
+         } else {                    // else we must be really far...
             autoDriveSpeed = 0.20;   //   go as fast as we dare
          }
-#else          
-          if      (15 < limey ) {
-            autoDriveSpeed = -0.1;
-         }
-          else if ( 12 < limey )  {         // if we're really close...
-            autoDriveSpeed = 0.0;   //   go slow
-         } else if ( 8 < limey ) {   // if we're a little farther...
-            autoDriveSpeed = 0.1;   //   go a little faster
-         } else if ( 2 < limey ) {   // if we're farther still...
-            autoDriveSpeed = 0.15;   //   go a little faster still
-         } else {                     // else we must be really far...
-            autoDriveSpeed = 0.20;   //   go as fast as we dare
-         }
-#endif         
+
                           // LATER: May want to modify autoDriveSpeed depending
                           // on the distance from the target determined
                           // by sonar transducers.
@@ -164,6 +155,38 @@ class Robot : public frc::TimedRobot {
    }  /* DriveToTarget() */
 
  public:
+   void joystickDisplay( void ) {
+         cout << "joy: " << m_stick.GetY() << "/" << m_stick.GetX();
+         cout << " (" << sCurrState.joyY << "/" << sCurrState.joyX << " )";
+         cout << endl;
+   }
+
+   void motorDisplay( const char * cTitle,
+		      WPI_TalonSRX & m_motor,
+		      struct sMotorState & sMState ) {
+      double motorVelocity = m_motor.GetSelectedSensorVelocity();
+      cout << cTitle << " vel(min:max)tgt/% A (pos): ";
+      cout << motorVelocity*600/4096;
+      cout << "(" << sMState.sensorVmin*600/4096 << ":";
+      cout <<        sMState.sensorVmax*600/4096 << ")";
+      cout << sMState.targetVelocity_UnitsPer100ms*600/4096 << "/ ";
+      cout << m_motor.GetMotorOutputPercent() << "% ";
+      cout << m_motor.GetStatorCurrent() << "A ";
+      cout << "(" << m_motor.GetSelectedSensorPosition() << ")";
+      cout << endl;
+      sMState.sensorVmin = sMState.sensorVmax = motorVelocity;
+   }
+
+   void motorFindMinMaxVelocity( WPI_TalonSRX & m_motor,
+		                 struct sMotorState & sMState ) {
+      double motorVelocity = m_motor.GetSelectedSensorVelocity();
+      if ( motorVelocity < sMState.sensorVmin ) {
+         sMState.sensorVmin = motorVelocity;
+      } else if ( sMState.sensorVmax < motorVelocity ) {
+         sMState.sensorVmax = motorVelocity;
+      }
+   }
+
    void motorInit( WPI_TalonSRX & m_motor ) {
 
          /* Setup initial configuration of a motor.  These settings can be  */
@@ -207,13 +230,13 @@ class Robot : public frc::TimedRobot {
       m_motor.ConfigPeakOutputForward(    1, 10 );
       m_motor.ConfigPeakOutputReverse(   -1, 10 );
 
-      m_motor.ConfigPeakCurrentLimit(60);    // 60 works here for miniCIMs
-      m_motor.ConfigPeakCurrentDuration(1000);  // 1000 milliseconds (for 60 Amps)
+      m_motor.ConfigPeakCurrentLimit(10);    // 60 works here for miniCIMs
+      m_motor.ConfigPeakCurrentDuration(1);  // 1000 milliseconds (for 60 Amps)
                                              // works fine here, with 40 for
                                              // ConfigContinuousCurrentLimit(),
                                              // but we can reduce to 10, 1, 10
                                              // for safety while debugging
-      m_motor.ConfigContinuousCurrentLimit(40);
+      m_motor.ConfigContinuousCurrentLimit(10);
       m_motor.EnableCurrentLimit(true);
 
          /* Set Closed Loop PIDF gains in slot0 - see documentation */
@@ -312,13 +335,13 @@ class Robot : public frc::TimedRobot {
       if ( OK == m_motorBotShooter.ConfigSelectedFeedbackSensor(   // if encoder is connected
                             FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
          m_motorBotShooter.SelectProfileSlot( 0, 0 );
-         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorBotShooter.Config_kP( 0, 0.08, 10 );   // 0.08 for shooter (775 at 5:1)
-         m_motorBotShooter.Config_kI( 0, 0.00008, 10 ); // 0.00008 for shooter (775 at 5:1)
-         m_motorBotShooter.Config_kD( 0, 0.8, 10 );    // 0.8 for shooter (775 at 5:1)
+         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 3:1)
+         m_motorBotShooter.Config_kP( 0, 0.08, 10 );   // 0.08 for shooter (775 at 3:1)
+         m_motorBotShooter.Config_kI( 0, 0.00008, 10 ); // 0.00008 for shooter (775 at 3:1)
+         m_motorBotShooter.Config_kD( 0, 0.8, 10 );    // 0.8 for shooter (775 at 3:1)
       } else {
          m_motorBotShooter.SelectProfileSlot( 0, 0 );
-         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 5:1)
+         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 3:1)
          m_motorBotShooter.Config_kP( 0, 0.0, 10 );
          m_motorBotShooter.Config_kI( 0, 0.0, 10 );
          m_motorBotShooter.Config_kD( 0, 0.0, 10 );
@@ -338,74 +361,55 @@ class Robot : public frc::TimedRobot {
 
    void AutonomousPeriodic() override {
 
-#ifdef JAG_NOTDEFINED
       GetAllVariables();
-                                       /* This is an example of how to read */
-                                       /* a button on the joystick.         */
-      if ( ( sCurrState.joyButton[3] ) &&       // If driver is pressing the
-         ( 1  == limev )                 ) {    // "drivetotarget" button and
-                                                // the limelight has a target,
-         DriveToTarget();        // then autonomously drive towards the target
-      } else { 
-         if ( m_stick.GetTrigger() ) {
-            // m_shiftingSolenoid.Set(  true ); // hi gear
-         } else {
-            // m_shiftingSolenoid.Set( false ); // lo gear
-         }
-         // m_drive.CurvatureDrive( m_stick.GetY(), 0, 0 );
-      } 
 
-                                       /* This is an example of how to read */
-                                       /* a button on the console.          */
-      if ( m_console.GetRawButton(3) ) {
-            // wantBrakeEngaged = false;
-      } else if ( m_console.GetRawButton(4) ) {
-            // wantBrakeEngaged = true;
-      } 
-                                    /* Drive the robot according to the     */
-                                    /* commanded Y and X joystick position. */
-      m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
+      iCallCount++;
 
-         /* We could drive the motors directly instead, with Percent Output. */
-         //  m_motorLSMaster.Set( ControlMode::PercentOutput,
-         //                       -m_console.GetY() * drivePowerFactor );
-         //  m_motorRSMaster.Set( ControlMode::PercentOutput,
-         //                       -m_console.GetY() * drivePowerFactor );
+      m_drive.StopMotor();
+      LSMotorState.targetVelocity_UnitsPer100ms = 0; // Left Side drive
+      RSMotorState.targetVelocity_UnitsPer100ms = 0; // Right Side drive
 
-         // Or we could drive the motors with the xbox controller, and 
-         // using CurvatureDrive.
-         //   m_drive.CurvatureDrive( GetSimY(),
-         //           m_xbox.GetX( frc::GenericHID::kLeftHand ),
-         //           m_xbox.GetBumperPressed( frc::GenericHID::kRightHand ) );
-         #endif
+      LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+      RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
 
-         iCallCount++;
-         static double LStargetVelocity_UnitsPer100ms = 0; // Left Side drive
-         static double RStargetVelocity_UnitsPer100ms = 0; // Right Side drive
+      if (iCallCount<50) {
+         LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+      } else if (iCallCount<100) {
+         LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+      } else if (iCallCount<400) {
+         LSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+      } else if (iCallCount<1500) {
+         m_motorLSMaster.Config_kF( 0, 0.90, 10 );   // 0.15 normally
+         m_motorLSMaster.Config_kP( 0, 0.2, 10 );    // 0.2  normally
+         m_motorRSMaster.Config_kF( 0, 1.20, 10 );
+         m_motorRSMaster.Config_kP( 0, 0.2, 10 );
+         LSMotorState.targetVelocity_UnitsPer100ms = 20.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms =-20.0 * 4096 / 600;
+      } else if (iCallCount<2000) {
+         LSMotorState.targetVelocity_UnitsPer100ms = -10.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms =  10.0 * 4096 / 600;
+      } else {
+         m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // 0.15 normally
+         m_motorRSMaster.Config_kF( 0, 0.15, 10 );
+         LSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+      }
 
-         LStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-         RStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-         if (iCallCount<50) {
-            LStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-            RStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-         } else if (iCallCount<100) {
-            LStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-            RStargetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
-         } else if (iCallCount<150) {
-            LStargetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
-            RStargetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-         } else if (iCallCount<200) {
-            LStargetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
-            RStargetVelocity_UnitsPer100ms =-150.0 * 4096 / 600;
-         } else {
-            LStargetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
-            RStargetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
-         }
+      m_motorLSMaster.Set( ControlMode::Velocity, 
+                           LSMotorState.targetVelocity_UnitsPer100ms);
+      m_motorRSMaster.Set( ControlMode::Velocity, 
+                           RSMotorState.targetVelocity_UnitsPer100ms);
 
-         m_motorLSMaster.Set( ControlMode::Velocity, 
-                              LStargetVelocity_UnitsPer100ms);
-         m_motorRSMaster.Set( ControlMode::Velocity, 
-                              RStargetVelocity_UnitsPer100ms);
+      motorFindMinMaxVelocity( m_motorLSMaster, LSMotorState );
+      motorFindMinMaxVelocity( m_motorRSMaster, RSMotorState );
+
+      if ( 0 == iCallCount%100 ) {
+         motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
+         motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+      }
    }
 
    void TeleopInit() override {
@@ -421,81 +425,60 @@ class Robot : public frc::TimedRobot {
       GetAllVariables();  // this is necessary if we use any
                           // of the Canbus variables.
 
-      static double LStargetVelocity_UnitsPer100ms = 0; // Left Side drive
-      static double RStargetVelocity_UnitsPer100ms = 0; // Right Side drive
-      static double TStargetVelocity_UnitsPer100ms = 0; // Top Shooter
-      static double BStargetVelocity_UnitsPer100ms = 0; // Bottom Shooter
-
-      static double RSsensorVmax, RSsensorVmin;
-      static double LSsensorVmax, LSsensorVmin;
-      static double TSsensorVmax, TSsensorVmin;
-      static double BSsensorVmax, BSsensorVmin;
-      
-
-      if ( m_motorLSMaster.GetSelectedSensorVelocity() < LSsensorVmin )
-         LSsensorVmin = m_motorLSMaster.GetSelectedSensorVelocity();
-      else if ( LSsensorVmax < m_motorLSMaster.GetSelectedSensorVelocity() )
-         LSsensorVmax = m_motorLSMaster.GetSelectedSensorVelocity();
-      if ( m_motorRSMaster.GetSelectedSensorVelocity() < RSsensorVmin )
-         RSsensorVmin = m_motorRSMaster.GetSelectedSensorVelocity();
-      else if ( RSsensorVmax < m_motorRSMaster.GetSelectedSensorVelocity() )
-         RSsensorVmax = m_motorRSMaster.GetSelectedSensorVelocity();
-
-      if ( m_motorTopShooter.GetSelectedSensorVelocity() < TSsensorVmin )
-         TSsensorVmin = m_motorTopShooter.GetSelectedSensorVelocity();
-      else if ( TSsensorVmax < m_motorTopShooter.GetSelectedSensorVelocity() )
-         TSsensorVmax = m_motorTopShooter.GetSelectedSensorVelocity();
-      if ( m_motorBotShooter.GetSelectedSensorVelocity() < BSsensorVmin )
-         BSsensorVmin = m_motorBotShooter.GetSelectedSensorVelocity();
-      else if ( BSsensorVmax < m_motorBotShooter.GetSelectedSensorVelocity() )
-         BSsensorVmax = m_motorBotShooter.GetSelectedSensorVelocity();
+//      LSMotorState.targetVelocity_UnitsPer100ms = 0; // Left Side drive
+//      RSMotorState.targetVelocity_UnitsPer100ms = 0; // Right Side drive
+//      TSMotorState.targetVelocity_UnitsPer100ms = 0; // Top Shooter
+//      BSMotorState.targetVelocity_UnitsPer100ms = 0; // Bottom Shooter
 
       if ( ( 0 == iCallCount%100 )  &&
            sCurrState.joyButton[2]     ) {
 
          if ( 0.5 < m_stick.GetY() &&
-              LStargetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
-            LStargetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
+              LSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
+            LSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
          } else if ( m_stick.GetY() < -0.5 &&
-                     -790.0 * 4096 / 600 < LStargetVelocity_UnitsPer100ms ) {
-            LStargetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
+                     -790.0 * 4096 / 600 < LSMotorState.targetVelocity_UnitsPer100ms ) {
+            LSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
          }
          if ( 0.5 < m_stick.GetX() &&
-              RStargetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
-            RStargetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
+              RSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
+            RSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
          } else if ( m_stick.GetX() < -0.5 && 
-                     -790.0 * 4096 / 600 < RStargetVelocity_UnitsPer100ms ) {
-            RStargetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
+                     -790.0 * 4096 / 600 < RSMotorState.targetVelocity_UnitsPer100ms ) {
+            RSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
          }
       }
                /* The following code uses the 4 "joystick"-type buttons     */
                /* on the console to select different speeds                 */
                /* (targetVelocities) of the top and bottom shooter motors.  */
-            /* jagtemp; The button numbers here may be wrong, and should be corrected. */
-            /* jagtemp; also the max speeds (forwards and backwards) need to be        */
-            /*          found and entered here (replacing the "5990" values).          */
       if (   ( 0.5 < sCurrState.conY ) &&     // if console "joystick" is
             !( 0.5 < sPrevState.conY ) &&     // newly-pressed upward
-           TStargetVelocity_UnitsPer100ms < 3000.0 * 4096 / 600 ) {
-         TStargetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
+           TSMotorState.targetVelocity_UnitsPer100ms < 3000.0 * 4096 / 600 ) {
+         TSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
       } else if (  ( sCurrState.conY < -0.5 ) &&  // else if newly-pressed
                   !( sPrevState.conY < -0.5 ) &&  // downward
-                  -3000.0 * 4096 / 600 < TStargetVelocity_UnitsPer100ms ) {
-         TStargetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
+                  -3000.0 * 4096 / 600 < TSMotorState.targetVelocity_UnitsPer100ms ) {
+         TSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
       }
       if (  ( 0.5 < sCurrState.conX ) &&     // if console "joystick" is
            !( 0.5 < sPrevState.conX ) &&     // newly-pressed to right
-           BStargetVelocity_UnitsPer100ms < 5000.0 * 4096 / 600 ) {
-         BStargetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
+           BSMotorState.targetVelocity_UnitsPer100ms < 5000.0 * 4096 / 600 ) {
+         BSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
       } else if (  ( sCurrState.conX < -0.5 ) &&  // else if newly-pressed
                   !( sPrevState.conX < -0.5 ) &&  // to the left
-                  -5000.0 * 4096 / 600 < BStargetVelocity_UnitsPer100ms ) {
-         BStargetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
+                  -5000.0 * 4096 / 600 < BSMotorState.targetVelocity_UnitsPer100ms ) {
+         BSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
       }
+
+      motorFindMinMaxVelocity( m_motorLSMaster, LSMotorState );
+      motorFindMinMaxVelocity( m_motorRSMaster, RSMotorState );
+      motorFindMinMaxVelocity( m_motorTopShooter, LSMotorState );
+      motorFindMinMaxVelocity( m_motorBotShooter, BSMotorState );
 
 #ifndef JAGNOTDEFINED
       if ( 0 == iCallCount%100 )  {   // every 2 seconds
 #ifdef JAGNOTDEFINED
+         joystickDisplay();
          cout << "joy: " << m_stick.GetY() << "/" << m_stick.GetX();
          cout << " (" << sCurrState.joyY << "/" << sCurrState.joyX << " )";
          cout << endl;
@@ -519,28 +502,32 @@ class Robot : public frc::TimedRobot {
          cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
          cout << RoborioAccel.GetY() << "/";
          cout << RoborioAccel.GetZ() << endl;
-#endif
          cout << "TopShooter: vel/min:max/tgt % A: ";
          cout << m_motorTopShooter.GetSelectedSensorVelocity()*600/4096 << "/";
-         cout << TSsensorVmin*600/4096 << ":" << TSsensorVmax*600/4096 << "/";
-         cout << TStargetVelocity_UnitsPer100ms*600/4096 << " ";
+         // xx cout << TSsensorVmin*600/4096 << ":" << TSsensorVmax*600/4096 << "/";
+         // xx cout << TStargetVelocity_UnitsPer100ms*600/4096 << " ";
          // cout << m_motorTopShooter.GetSelectedSensorPosition() << "/";
          cout << m_motorTopShooter.GetMotorOutputPercent() << "% ";
          cout << m_motorTopShooter.GetStatorCurrent();
          cout << endl;
          cout << "BotShooter: vel/min:max/tgt % A: ";
          cout << m_motorBotShooter.GetSelectedSensorVelocity()*600/4096 << "/";
-         cout << BSsensorVmin*600/4096 << ":" << BSsensorVmax*600/4096 << "/";
-         cout << BStargetVelocity_UnitsPer100ms*600/4096 << " ";
+         // xx cout << BSsensorVmin*600/4096 << ":" << BSsensorVmax*600/4096 << "/";
+         // xx cout << BStargetVelocity_UnitsPer100ms*600/4096 << " ";
          // cout << m_motorBotShooter.GetSelectedSensorPosition() << "/";
          cout << m_motorBotShooter.GetMotorOutputPercent() << "% ";
          cout << m_motorBotShooter.GetStatorCurrent();
          cout << endl;
+#endif
+         // motorDisplay( "LS:", m_motorLSMaster,   LSMotorState );
+         // motorDisplay( "RS:", m_motorRSMaster,   RSMotorState );
+         motorDisplay( "TS:", m_motorTopShooter, TSMotorState );
+         motorDisplay( "BS:", m_motorBotShooter, BSMotorState );
 
-         LSsensorVmin = LSsensorVmax = m_motorLSMaster.GetSelectedSensorVelocity();
-         RSsensorVmin = RSsensorVmax = m_motorRSMaster.GetSelectedSensorVelocity();
-         TSsensorVmin = TSsensorVmax = m_motorTopShooter.GetSelectedSensorVelocity();
-         BSsensorVmin = BSsensorVmax = m_motorBotShooter.GetSelectedSensorVelocity();
+//         LSMotorState.sensorVmin = LSMotorState.sensorVmax = m_motorLSMaster.GetSelectedSensorVelocity();
+//         RSMotorState.sensorVmin = RSMotorState.sensorVmax = m_motorRSMaster.GetSelectedSensorVelocity();
+//         TSMotorState.sensorVmin = TSMotorState.sensorVmax = m_motorTopShooter.GetSelectedSensorVelocity();
+//         BSMotorState.sensorVmin = BSMotorState.sensorVmax = m_motorBotShooter.GetSelectedSensorVelocity();
       }
 #endif
 
@@ -580,17 +567,17 @@ class Robot : public frc::TimedRobot {
          if ( iButtonPressCallCount < 50 ) {   // turn motors on gently...
         	   m_motorLSMaster.Set( ControlMode::Velocity,
                   m_motorLSMaster.GetSelectedSensorVelocity() +
-                     0.2 * ( LStargetVelocity_UnitsPer100ms -
+                     0.2 * ( LSMotorState.targetVelocity_UnitsPer100ms -
                              m_motorLSMaster.GetSelectedSensorVelocity() ) );
             m_motorRSMaster.Set( ControlMode::Velocity,
                   m_motorRSMaster.GetSelectedSensorVelocity() +
-                     0.2 * ( RStargetVelocity_UnitsPer100ms -
+                     0.2 * ( RSMotorState.targetVelocity_UnitsPer100ms -
                              m_motorRSMaster.GetSelectedSensorVelocity() ) );
          } else {
             m_motorLSMaster.Set( ControlMode::Velocity, 
-                                   LStargetVelocity_UnitsPer100ms);
+                                   LSMotorState.targetVelocity_UnitsPer100ms);
             m_motorRSMaster.Set( ControlMode::Velocity, 
-                                   RStargetVelocity_UnitsPer100ms);
+                                   RSMotorState.targetVelocity_UnitsPer100ms);
          }
          iButtonPressCallCount++;
       } else { 
@@ -610,13 +597,13 @@ class Robot : public frc::TimedRobot {
 			// double LStargetVelocity_UnitsPer100ms = m_stick.GetY() * 500.0 * 4096 / 600;
          // double RStargetVelocity_UnitsPer100ms = m_stick.GetX() * 500.0 * 4096 / 600;
 			/* 500 RPM in either direction */
-         // LStargetVelocity_UnitsPer100ms = 0;
-         // RStargetVelocity_UnitsPer100ms = 0;
+         // LSMotorState.targetVelocity_UnitsPer100ms = 0;
+         // RSMotorState.targetVelocity_UnitsPer100ms = 0;
       if ( sCurrState.conButton[9] ){    // second-from-leftmost missile switch
          m_motorTopShooter.Set( ControlMode::Velocity, 
-                                TStargetVelocity_UnitsPer100ms );
+                                TSMotorState.targetVelocity_UnitsPer100ms );
          m_motorBotShooter.Set( ControlMode::Velocity, 
-                                BStargetVelocity_UnitsPer100ms );
+                                BSMotorState.targetVelocity_UnitsPer100ms );
       } else if ( sCurrState.conButton[12] ) {  // leftmost missile switch
          static int iButtonPressCallCount = 0;
 
@@ -627,31 +614,26 @@ class Robot : public frc::TimedRobot {
 
         	   m_motorTopShooter.Set( ControlMode::Velocity,
                   m_motorTopShooter.GetSelectedSensorVelocity() +
-                     0.2 * ( TStargetVelocity_UnitsPer100ms -
+                     0.2 * ( TSMotorState.targetVelocity_UnitsPer100ms -
                              m_motorTopShooter.GetSelectedSensorVelocity() ) );
             m_motorBotShooter.Set( ControlMode::Velocity,
                   m_motorBotShooter.GetSelectedSensorVelocity() +
-                     0.2 * ( BStargetVelocity_UnitsPer100ms -
+                     0.2 * ( BSMotorState.targetVelocity_UnitsPer100ms -
                              m_motorBotShooter.GetSelectedSensorVelocity() ) );
          } else {
             m_motorTopShooter.Set( ControlMode::Velocity, 
-                                   TStargetVelocity_UnitsPer100ms);
+                                   TSMotorState.targetVelocity_UnitsPer100ms);
             m_motorBotShooter.Set( ControlMode::Velocity, 
-                                   BStargetVelocity_UnitsPer100ms);
+                                   BSMotorState.targetVelocity_UnitsPer100ms);
          }
          iButtonPressCallCount++;
          
       } else {
                            // slow down slowly, over about 2 seconds
-#ifndef JAGNOTDEFINED
          m_motorTopShooter.Set( ControlMode::Velocity,
                               0.8 * m_motorTopShooter.GetSelectedSensorVelocity() );
          m_motorBotShooter.Set(ControlMode::Velocity,
                               0.8 * m_motorBotShooter.GetSelectedSensorVelocity() );
-#else
-         m_motorTopShooter.Set( ControlMode::Velocity, 0 );
-         m_motorBotShooter.Set( ControlMode::Velocity, 0 );
-#endif
       }
          // m_motorLSMaster.Set( ControlMode::,
          //                      -m_stick.GetY() );
@@ -668,6 +650,7 @@ class Robot : public frc::TimedRobot {
 
       iCallCount++;
    }
+   
  private:
 
          // Note for future: Need to add a gyro here.
@@ -698,6 +681,8 @@ class Robot : public frc::TimedRobot {
       bool   joyButton[16];
       bool   conButton[16];
    } sCurrState, sPrevState;
+
+   struct sMotorState LSMotorState, RSMotorState, TSMotorState, BSMotorState;
 
     bool aBooleanVariable = false;   // just an example of a boolean variable
    int    iCallCount = 0;
