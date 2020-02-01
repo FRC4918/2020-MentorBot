@@ -686,8 +686,8 @@ class Robot : public frc::TimedRobot {
       double joyY;
       double conX;
       double conY;
-      bool   joyButton[1:11];
-      bool   conButton[1:12];
+      bool   joyButton[12];
+      bool   conButton[13];
    } sCurrState, sPrevState;
 
    struct sMotorState LSMotorState, RSMotorState, TSMotorState, BSMotorState;
