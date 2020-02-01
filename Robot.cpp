@@ -37,18 +37,65 @@ using std::endl;
 class Robot : public frc::TimedRobot {
  private:
 
+         // Note for future: Need to add a gyro here.
+   WPI_TalonSRX m_motorLSMaster{   0 };   // Left  side drive motor
+   WPI_TalonSRX m_motorRSMaster{   8 };   // Right side drive motor   
+   WPI_VictorSPX m_motorLSSlave1{ 14 };   // Left  side slave motor
+   WPI_VictorSPX m_motorRSSlave1{  1 };   // Right side slave motor
+   WPI_TalonSRX m_motorTopShooter{ 2 };   // top motor on shooter
+   WPI_TalonSRX m_motorBotShooter{ 9 };   // bottom motor on shooter
+
+   int iAutoCount;
+   float drivePowerFactor = 0.8;
+   frc::Joystick m_stick{0};
+   frc::Joystick m_console{1};
+   frc::DifferentialDrive m_drive{ m_motorLSMaster, m_motorRSMaster };
+   //frc::PowerDistributionPanel pdp{0};
+   frc::AnalogInput DistSensor1{0};
+   frc::BuiltInAccelerometer RoborioAccel{};
+
+   std::shared_ptr<NetworkTable> limenttable =
+               nt::NetworkTableInstance::GetDefault().GetTable( "limelight" );
+
+   struct sState {
+      double joyX;
+      double joyY;
+      double conX;
+      double conY;
+      bool   joyButton[12];
+      bool   conButton[13];
+   } sCurrState, sPrevState;
+
    struct sMotorState {
       double targetVelocity_UnitsPer100ms;
       double sensorVmax, sensorVmin;
    };
 
-   static void VisionThread() {
+   struct sMotorState LSMotorState, RSMotorState, TSMotorState, BSMotorState;
 
-         // This function executes as a separate thread, to take 640x480 pixel
-         // video frames from the USB video camera, change to grayscale, and
-         // send to the DriverStation. It is documented here:
-         // https://wpilib.screenstepslive.com/s/currentCS/m/vision/l/
-         //         669166-using-the-cameraserver-on-the-roborio
+   bool aBooleanVariable = false;    // just an example of a boolean variable
+   int    iCallCount = 0;
+   double dTimeOfLastCall = 0.0;
+
+                 /* limelight variables: x: offset from centerline,         */
+                 /*                      y: offset from centerline,         */
+                 /*                      a: area of target, % (0-100),      */
+                 /*                      v: whether the data is valid,      */
+                 /*                      s: skew or rotation, deg (-90-0).  */
+   double limex, limey, limea, limev, limes;
+
+
+      /*---------------------------------------------------------------------*/
+      /* VisionThread()                                                      */
+      /* This function executes as a separate thread, to take 640x480-pixel  */
+      /* video frames from the USB video camera, change to grayscale,        */
+      /* and send to the DriverStation. It is documented here:               */
+      /* https://docs.wpilib.org/en/latest/docs/software/vision-processing/  */
+      /*         introduction/using-the-cameraserver-on-the-roborio.html     */
+      /* http://opencv-cpp.blogspot.com/2016/10/                             */
+      /*        object-detection-and-tracking-color-separation.html          */
+      /*---------------------------------------------------------------------*/
+   static void VisionThread() {
       cs::UsbCamera camera =
                  frc::CameraServer::GetInstance()->StartAutomaticCapture();
          //camera.SetResolution( 640, 480 );
@@ -69,11 +116,14 @@ class Robot : public frc::TimedRobot {
       }
    }
     
-        // GetAllVariables() retrieves all variable values from sensors,
-        // encoders, the limelight, etc.  It should be called at the beginning
-        // of every 20-millisecond tick.  Doing it this way, rather than
-        // having each function retrieve the values it needs when it needs
-        // them, should minimize CANbus traffic and keep the robot CPU fast.
+      /*---------------------------------------------------------------------*/
+      /* GetAllVariables()                                                   */
+      /* Retrieves all variable values from sensors, encoders,               */
+      /* the limelight, etc.  It should be called at the beginning of        */
+      /* every 20-millisecond tick.  Doing it this way, rather than          */
+      /* having each function retrieve the values it needs when it needs     */
+      /* them, should minimize CANbus traffic and keep the robot CPU fast.   */
+      /*---------------------------------------------------------------------*/
    void GetAllVariables()  {
 
       dTimeOfLastCall = frc::GetTime();   // use frc::Timer::GetFPGATimestamp() instead?
@@ -94,8 +144,12 @@ class Robot : public frc::TimedRobot {
       limey = limenttable->GetNumber("ty",0.0);  // y position
       limes = limenttable->GetNumber("ts",0.0);  // skew
    }
-        // DriveToTarget() drives autonomously towards a vision target.
-        // It returns true if the limelight data is valid, false otherwise.
+
+      /*---------------------------------------------------------------------*/
+      /* DriveToTarget()                                                     */
+      /* DriveToTarget() drives autonomously towards a vision target.        */
+      /* It returns true if the limelight data is valid, false otherwise.    */
+      /*---------------------------------------------------------------------*/
    bool DriveToTarget()  {
 
       bool returnVal = true;
@@ -157,12 +211,21 @@ class Robot : public frc::TimedRobot {
 
  public:
 
+      /*---------------------------------------------------------------------*/
+      /* joystickDisplay()                                                   */
+      /* Display all the joystick values on the console log.                 */
+      /*---------------------------------------------------------------------*/
    void joystickDisplay( void ) {
          cout << "joy: " << m_stick.GetY() << "/" << m_stick.GetX();
          cout << " (" << sCurrState.joyY << "/" << sCurrState.joyX << " )";
          cout << endl;
    }
 
+      /*---------------------------------------------------------------------*/
+      /* motorDisplay()                                                      */
+      /* Display all the current motor values for a specified motor on the   */
+      /* console log.                                                        */
+      /*---------------------------------------------------------------------*/
    void motorDisplay( const char * cTitle,
                       WPI_TalonSRX & m_motor,
                       struct sMotorState & sMState ) {
@@ -179,6 +242,11 @@ class Robot : public frc::TimedRobot {
       sMState.sensorVmin = sMState.sensorVmax = motorVelocity;
    }
 
+      /*---------------------------------------------------------------------*/
+      /* motorFindMinMaxVelocity()                                           */
+      /* Keep a motor's Vmin and Vmax updated, for display on the            */
+      /* console log.                                                        */
+      /*---------------------------------------------------------------------*/
    void motorFindMinMaxVelocity( WPI_TalonSRX & m_motor,
                                  struct sMotorState & sMState ) {
       double motorVelocity = m_motor.GetSelectedSensorVelocity();
@@ -189,20 +257,25 @@ class Robot : public frc::TimedRobot {
       }
    }
 
+      /*---------------------------------------------------------------------*/
+      /* motorInit()                                                         */
+      /* Setup the initial configuration of a motor.  These settings can be  */
+      /* superseded after this function is called, for the needs of each     */
+      /* specific motor.                                                     */
+      /*---------------------------------------------------------------------*/
    void motorInit( WPI_TalonSRX & m_motor ) {
-
-         /* Setup initial configuration of a motor.  These settings can be  */
-         /* superseded after this function is called, for the needs of each */
-         /* specific motor.                                                 */
 
                 /* Configure Sensor Source for Primary PID */
           /* Config to stop motor immediately when limit switch is closed. */
-      if ( OK == m_motor.ConfigSelectedFeedbackSensor(       // if encoder is connected
-                            FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
-         m_motor.ConfigForwardLimitSwitchSource(LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
-                           LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
-         m_motor.ConfigReverseLimitSwitchSource(LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
-                           LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
+                                                   // if encoder is connected
+      if ( OK == m_motor.ConfigSelectedFeedbackSensor(
+                          FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
+         m_motor.ConfigForwardLimitSwitchSource(
+                     LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
+                     LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
+         m_motor.ConfigReverseLimitSwitchSource(
+                     LimitSwitchSource::LimitSwitchSource_FeedbackConnector,
+                     LimitSwitchNormal::LimitSwitchNormal_NormallyOpen );
          m_motor.OverrideLimitSwitchesEnable(true);
       }
 
@@ -213,23 +286,23 @@ class Robot : public frc::TimedRobot {
           * Phase sensor to have positive increment when driving Talon Forward
           * (Green LED)
           */
-                                    // inverts encoder value positive/negative
-      m_motor.SetSensorPhase(true);
-      // m_motor.SetInverted(false);
+      m_motor.SetSensorPhase(true);   // invert encoder value positive/negative
+      // m_motor.SetInverted(false);  // invert direction of motor itself.
 
-                       /* Set relevant frame periods to be at least as fast */
-                       /* as the periodic rate.                             */
+                        /* Set relevant frame periods to be at least as fast */
+                        /* as the periodic rate.                             */
       m_motor.SetStatusFramePeriod(
                          StatusFrameEnhanced::Status_13_Base_PIDF0,  10, 10 );
       m_motor.SetStatusFramePeriod(
                          StatusFrameEnhanced::Status_10_MotionMagic, 10, 10 );
 
-          /* Set the peak and nominal outputs */
+                                         /* Set the peak and nominal outputs */
       m_motor.ConfigNominalOutputForward( 0, 10 );
       m_motor.ConfigNominalOutputReverse( 0, 10 );
       m_motor.ConfigPeakOutputForward(    1, 10 );
       m_motor.ConfigPeakOutputReverse(   -1, 10 );
 
+            /* Set limits to how much current will be sent through the motor */
       m_motor.ConfigPeakCurrentLimit(10);    // 60 works here for miniCIMs
       m_motor.ConfigPeakCurrentDuration(1);  // 1000 milliseconds (for 60 Amps)
                                              // works fine here, with 40 for
@@ -239,17 +312,18 @@ class Robot : public frc::TimedRobot {
       m_motor.ConfigContinuousCurrentLimit(10);
       m_motor.EnableCurrentLimit(true);
 
-         /* Set Closed Loop PIDF gains in slot0 - see documentation */
-      if ( OK == m_motor.ConfigSelectedFeedbackSensor(   // if encoder is connected
-                            FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
+                 /* Set Closed Loop PIDF gains in slot0 - see documentation */
+                                                    // if encoder is connected
+      if ( OK == m_motor.ConfigSelectedFeedbackSensor(
+                          FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
          m_motor.SelectProfileSlot( 0, 0 );
-         m_motor.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motor.Config_kP( 0, 0.2, 10 );   // 0.08 for shooter (775 at 5:1)
-         m_motor.Config_kI( 0, 0.0002, 10 ); // 0.00008 for shooter (775 at 5:1)
-         m_motor.Config_kD( 0, 10.0, 10 );    // 0.8 for shooter (775 at 5:1)
+         m_motor.Config_kF( 0, 0.15,   10 );
+         m_motor.Config_kP( 0, 0.2,    10 );
+         m_motor.Config_kI( 0, 0.0002, 10 );
+         m_motor.Config_kD( 0, 10.0,   10 );
       } else {
          m_motor.SelectProfileSlot( 0, 0 );
-         m_motor.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
+         m_motor.Config_kF( 0, 0.15, 10 );
          m_motor.Config_kP( 0, 0.0, 10 );
          m_motor.Config_kI( 0, 0.0, 10 );
          m_motor.Config_kD( 0, 0.0, 10 );
@@ -264,6 +338,12 @@ class Robot : public frc::TimedRobot {
       m_motor.ConfigOpenloopRamp(  0.0);
    }
 
+      /*---------------------------------------------------------------------*/
+      /* RobotInit()                                                         */
+      /* This function is called once when the robot is powered up.          */
+      /* It performs preliminary initialization of all hardware that will    */
+      /* be used in Autonomous or Teleop modes.                              */
+      /*---------------------------------------------------------------------*/
    void RobotInit() {
                                 // start a thread processing USB camera images
       std::thread visionThread(VisionThread);
@@ -288,70 +368,82 @@ class Robot : public frc::TimedRobot {
       // m_motorBotShooter.SetInverted(false);
 
             /* Set Closed Loop PIDF gains in slot0 - see documentation */
-      if ( OK == m_motorLSMaster.ConfigSelectedFeedbackSensor(   // if encoder is connected
+                                                    // if encoder is connected
+      if ( OK == m_motorLSMaster.ConfigSelectedFeedbackSensor(
                             FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
          m_motorLSMaster.SelectProfileSlot( 0, 0 );
-         m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorLSMaster.Config_kP( 0, 0.2, 10 );   // 0.08 for shooter (775 at 5:1)
-         m_motorLSMaster.Config_kI( 0, 0.0002, 10 ); // 0.00008 for shooter (775 at 5:1)
-         m_motorLSMaster.Config_kD( 0, 10.0, 10 );    // 0.8 for shooter (775 at 5:1)
+         m_motorLSMaster.Config_kF( 0, 0.15,   10 );   // these work well for
+         m_motorLSMaster.Config_kP( 0, 0.2,    10 );   // RPMs above ~200
+         m_motorLSMaster.Config_kI( 0, 0.0002, 10 );
+         m_motorLSMaster.Config_kD( 0, 10.0,   10 );
       } else {
          m_motorLSMaster.SelectProfileSlot( 0, 0 );
-         m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorLSMaster.Config_kP( 0, 0.0, 10 );
-         m_motorLSMaster.Config_kI( 0, 0.0, 10 );
-         m_motorLSMaster.Config_kD( 0, 0.0, 10 );
+         m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // may have to be higher
+         m_motorLSMaster.Config_kP( 0, 0.0,  10 );
+         m_motorLSMaster.Config_kI( 0, 0.0,  10 );
+         m_motorLSMaster.Config_kD( 0, 0.0,  10 );
       }
 
-      if ( OK == m_motorRSMaster.ConfigSelectedFeedbackSensor(   // if encoder is connected
-                            FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
+                                                    // if encoder is connected
+      if ( OK == m_motorRSMaster.ConfigSelectedFeedbackSensor(
+                          FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
          m_motorRSMaster.SelectProfileSlot( 0, 0 );
-         m_motorRSMaster.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorRSMaster.Config_kP( 0, 0.2, 10 );   // 0.08 for shooter (775 at 5:1)
-         m_motorRSMaster.Config_kI( 0, 0.0002, 10 ); // 0.00008 for shooter (775 at 5:1)
-         m_motorRSMaster.Config_kD( 0, 10.0, 10 );    // 0.8 for shooter (775 at 5:1)
+         m_motorRSMaster.Config_kF( 0, 0.15,   10 );   // these work well for
+         m_motorRSMaster.Config_kP( 0, 0.2,    10 );   // RPMs above ~200
+         m_motorRSMaster.Config_kI( 0, 0.0002, 10 );
+         m_motorRSMaster.Config_kD( 0, 10.0,   10 );
       } else {
          m_motorRSMaster.SelectProfileSlot( 0, 0 );
-         m_motorRSMaster.Config_kF( 0, 0.15, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorRSMaster.Config_kP( 0, 0.0, 10 );
-         m_motorRSMaster.Config_kI( 0, 0.0, 10 );
-         m_motorRSMaster.Config_kD( 0, 0.0, 10 );
+         m_motorRSMaster.Config_kF( 0, 0.15, 10 );   // may have to be higher
+         m_motorRSMaster.Config_kP( 0, 0.0,  10 );
+         m_motorRSMaster.Config_kI( 0, 0.0,  10 );
+         m_motorRSMaster.Config_kD( 0, 0.0,  10 );
       }
 
-      if ( OK == m_motorTopShooter.ConfigSelectedFeedbackSensor(   // if encoder is connected
-                            FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
+                                                     // if encoder is connected
+      if ( OK == m_motorTopShooter.ConfigSelectedFeedbackSensor(
+                          FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
          m_motorTopShooter.SelectProfileSlot( 0, 0 );
-         m_motorTopShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorTopShooter.Config_kP( 0, 0.08, 10 );   // 0.08 for shooter (775 at 5:1)
-         m_motorTopShooter.Config_kI( 0, 0.00008, 10 ); // 0.00008 for shooter (775 at 5:1)
-         m_motorTopShooter.Config_kD( 0, 0.8, 10 );    // 0.8 for shooter (775 at 5:1)
+         m_motorTopShooter.Config_kF( 0, 0.01,    10 );
+         m_motorTopShooter.Config_kP( 0, 0.08,    10 );
+         m_motorTopShooter.Config_kI( 0, 0.00008, 10 );
+         m_motorTopShooter.Config_kD( 0, 0.8,     10 );
       } else {
          m_motorTopShooter.SelectProfileSlot( 0, 0 );
-         m_motorTopShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 5:1)
-         m_motorTopShooter.Config_kP( 0, 0.0, 10 );
-         m_motorTopShooter.Config_kI( 0, 0.0, 10 );
-         m_motorTopShooter.Config_kD( 0, 0.0, 10 );
+         m_motorTopShooter.Config_kF( 0, 0.01, 10 );   // may have to be higher
+         m_motorTopShooter.Config_kP( 0, 0.0,  10 );
+         m_motorTopShooter.Config_kI( 0, 0.0,  10 );
+         m_motorTopShooter.Config_kD( 0, 0.0,  10 );
       }
 
-      if ( OK == m_motorBotShooter.ConfigSelectedFeedbackSensor(   // if encoder is connected
-                            FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
+                                                     // if encoder is connected
+      if ( OK == m_motorBotShooter.ConfigSelectedFeedbackSensor(
+                          FeedbackDevice::CTRE_MagEncoder_Relative, 0, 10 ) ) {
          m_motorBotShooter.SelectProfileSlot( 0, 0 );
-         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 3:1)
-         m_motorBotShooter.Config_kP( 0, 0.08, 10 );   // 0.08 for shooter (775 at 3:1)
-         m_motorBotShooter.Config_kI( 0, 0.00008, 10 ); // 0.00008 for shooter (775 at 3:1)
-         m_motorBotShooter.Config_kD( 0, 0.8, 10 );    // 0.8 for shooter (775 at 3:1)
+         m_motorBotShooter.Config_kF( 0, 0.01,    10 );
+         m_motorBotShooter.Config_kP( 0, 0.08,    10 );
+         m_motorBotShooter.Config_kI( 0, 0.00008, 10 );
+         m_motorBotShooter.Config_kD( 0, 0.8,    10 );
       } else {
          m_motorBotShooter.SelectProfileSlot( 0, 0 );
-         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // 0.01 for shooter (775 at 3:1)
-         m_motorBotShooter.Config_kP( 0, 0.0, 10 );
-         m_motorBotShooter.Config_kI( 0, 0.0, 10 );
-         m_motorBotShooter.Config_kD( 0, 0.0, 10 );
+         m_motorBotShooter.Config_kF( 0, 0.01, 10 );   // may have to be higher
+         m_motorBotShooter.Config_kP( 0, 0.0,  10 );
+         m_motorBotShooter.Config_kI( 0, 0.0,  10 );
+         m_motorBotShooter.Config_kD( 0, 0.0,  10 );
       }
    }
 
+      /*---------------------------------------------------------------------*/
+      /* DisabledInit()                                                      */
+      /* This function is called once when the robot is disabled.            */
+      /*---------------------------------------------------------------------*/
    void DisabledInit() override {
    }
 
+      /*---------------------------------------------------------------------*/
+      /* AutonomousInit()                                                    */
+      /* This function is called once when the robot enters Autonomous mode. */
+      /*---------------------------------------------------------------------*/
    void AutonomousInit() override {
       cout << "shoot 3 balls" << endl;
       m_drive.StopMotor();
@@ -360,6 +452,11 @@ class Robot : public frc::TimedRobot {
       m_motorRSSlave1.Follow(m_motorRSMaster);
    }
 
+      /*---------------------------------------------------------------------*/
+      /* AutonomousPeriodic()                                                */
+      /* This function is called every 20 milliseconds, as long as the robot */
+      /* is in Autonomous mode.                                              */
+      /*---------------------------------------------------------------------*/
    void AutonomousPeriodic() override {
 
       GetAllVariables();
@@ -367,8 +464,8 @@ class Robot : public frc::TimedRobot {
       iCallCount++;
 
       m_drive.StopMotor();
-      LSMotorState.targetVelocity_UnitsPer100ms = 0; // Left Side drive
-      RSMotorState.targetVelocity_UnitsPer100ms = 0; // Right Side drive
+      LSMotorState.targetVelocity_UnitsPer100ms = 0;        // Left Side drive
+      RSMotorState.targetVelocity_UnitsPer100ms = 0;        // Right Side drive
 
       LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
       RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
@@ -383,17 +480,17 @@ class Robot : public frc::TimedRobot {
          LSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
          RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
       } else if (iCallCount<1500) {
-         m_motorLSMaster.Config_kF( 0, 0.90, 10 );   // 0.15 normally
-         m_motorLSMaster.Config_kP( 0, 0.2, 10 );    // 0.2  normally
+         m_motorLSMaster.Config_kF( 0, 0.90, 10 );      // 0.15 normally
+         m_motorLSMaster.Config_kP( 0, 0.2,  10 );      // 0.2  normally
          m_motorRSMaster.Config_kF( 0, 1.20, 10 );
-         m_motorRSMaster.Config_kP( 0, 0.2, 10 );
+         m_motorRSMaster.Config_kP( 0, 0.2,  10 );
          LSMotorState.targetVelocity_UnitsPer100ms = 20.0 * 4096 / 600;
          RSMotorState.targetVelocity_UnitsPer100ms =-20.0 * 4096 / 600;
       } else if (iCallCount<2000) {
          LSMotorState.targetVelocity_UnitsPer100ms = -10.0 * 4096 / 600;
          RSMotorState.targetVelocity_UnitsPer100ms =  10.0 * 4096 / 600;
       } else {
-         m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // 0.15 normally
+         m_motorLSMaster.Config_kF( 0, 0.15, 10 );     // 0.15 normally
          m_motorRSMaster.Config_kF( 0, 0.15, 10 );
          LSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
          RSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
@@ -413,14 +510,23 @@ class Robot : public frc::TimedRobot {
       }
    }
 
+      /*---------------------------------------------------------------------*/
+      /* TeleopInit()                                                        */
+      /* This function is called once when the robot enters Teleop mode.     */
+      /*---------------------------------------------------------------------*/
    void TeleopInit() override {
       m_motorLSSlave1.Follow(m_motorLSMaster);
       m_motorRSSlave1.Follow(m_motorRSMaster);
-                                                /* zeros the drive encoders */
+                                                    // zero the drive encoders
       m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
       m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
    }
 
+      /*---------------------------------------------------------------------*/
+      /* TeleopPeriodic()                                                    */
+      /* This function is called every 20 milliseconds, as long as the robot */
+      /* is in Teleop mode.                                                  */
+      /*---------------------------------------------------------------------*/
    void TeleopPeriodic() override {
 
       GetAllVariables();  // this is necessary if we use any
@@ -433,7 +539,8 @@ class Robot : public frc::TimedRobot {
               LSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
             LSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
          } else if ( m_stick.GetY() < -0.5 &&
-                     -790.0 * 4096 / 600 < LSMotorState.targetVelocity_UnitsPer100ms ) {
+                     -790.0 * 4096 / 600 <
+		                  LSMotorState.targetVelocity_UnitsPer100ms ) {
             LSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
          }
 
@@ -441,7 +548,8 @@ class Robot : public frc::TimedRobot {
               RSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
             RSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
          } else if ( m_stick.GetX() < -0.5 && 
-                     -790.0 * 4096 / 600 < RSMotorState.targetVelocity_UnitsPer100ms ) {
+                     -790.0 * 4096 / 600 <
+		                  RSMotorState.targetVelocity_UnitsPer100ms ) {
             RSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
          }
       }
@@ -454,7 +562,8 @@ class Robot : public frc::TimedRobot {
          TSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
       } else if (  ( sCurrState.conY < -0.5 ) &&  // else if newly-pressed
                   !( sPrevState.conY < -0.5 ) &&  // downward
-                  -3000.0 * 4096 / 600 < TSMotorState.targetVelocity_UnitsPer100ms ) {
+                  -3000.0 * 4096 / 600 <
+		                  TSMotorState.targetVelocity_UnitsPer100ms ) {
          TSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
       }
 
@@ -464,7 +573,8 @@ class Robot : public frc::TimedRobot {
          BSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
       } else if (  ( sCurrState.conX < -0.5 ) &&  // else if newly-pressed
                   !( sPrevState.conX < -0.5 ) &&  // to the left
-                  -5000.0 * 4096 / 600 < BSMotorState.targetVelocity_UnitsPer100ms ) {
+                  -5000.0 * 4096 / 600 <
+		                  BSMotorState.targetVelocity_UnitsPer100ms ) {
          BSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
       }
 
@@ -534,20 +644,26 @@ class Robot : public frc::TimedRobot {
                                         /* Button 3 is the topmost center   */
                                         /* button on the back of joystick.  */
       } else if ( sCurrState.joyButton[3] ) {
-         /* If button 3 pressed, assume 775Pro motors instead of mimi-CIM,  */
-         /* and drive the motors directly instead, with Percent Output.     */
+
+                     /* If button 3 pressed, drive the motors separately    */
+	             /* (rather than with ArcadeDrive) with Percent Output, */
+	             /* using the variables that have been set with the     */
+	             /* joystick while button 3 is pressed.                 */
          if ( !sPrevState.joyButton[3] ) {  // if button has just been pressed
             m_drive.StopMotor();
                                 // Set current sensor positions to zero
             m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
             m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
          }
-         m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
-         m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
          // m_motorLSMaster.Set( ControlMode::PercentOutput,
          //                      -m_stick.GetY() );
          // m_motorRSMaster.Set( ControlMode::PercentOutput,
          //                      -m_stick.GetX() );
+	                /* Use MotionMagic to set the position of the drive */
+	                /* wheels, rather than setting their velocity.      */
+         m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
+         m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
+
                                      /* Button 2 is the bottom-most center  */
                                      /* button on the back of the joystick. */
       } else if ( sCurrState.joyButton[2] ) {
@@ -557,7 +673,7 @@ class Robot : public frc::TimedRobot {
             iButtonPressCallCount = 0;
          }
 
-         if ( iButtonPressCallCount < 50 ) {   // turn motors on gently...
+         if ( iButtonPressCallCount < 50 ) {       // turn motors on gently...
             m_motorLSMaster.Set( ControlMode::Velocity,
                   m_motorLSMaster.GetSelectedSensorVelocity() +
                      0.2 * ( LSMotorState.targetVelocity_UnitsPer100ms -
@@ -615,10 +731,10 @@ class Robot : public frc::TimedRobot {
                                 TSMotorState.targetVelocity_UnitsPer100ms );
          m_motorBotShooter.Set( ControlMode::Velocity, 
                                 BSMotorState.targetVelocity_UnitsPer100ms );
-      } else if ( sCurrState.conButton[12] ) {  // leftmost missile switch
+      } else if ( sCurrState.conButton[12] ) {       // leftmost missile switch
          static int iButtonPressCallCount = 0;
 
-         if ( !sPrevState.conButton[12] ) {  // if switch was just turned on
+         if ( !sPrevState.conButton[12] ) {     // if switch was just turned on
             iButtonPressCallCount = 0;
          }
 
@@ -641,11 +757,11 @@ class Robot : public frc::TimedRobot {
          iButtonPressCallCount++;
          
       } else {
-                           // slow down slowly, over about 2 seconds
+                                      // slow down slowly, over about 2 seconds
          m_motorTopShooter.Set( ControlMode::Velocity,
-                              0.8 * m_motorTopShooter.GetSelectedSensorVelocity() );
+                         0.8 * m_motorTopShooter.GetSelectedSensorVelocity() );
          m_motorBotShooter.Set(ControlMode::Velocity,
-                              0.8 * m_motorBotShooter.GetSelectedSensorVelocity() );
+                         0.8 * m_motorBotShooter.GetSelectedSensorVelocity() );
       }
 
       sPrevState = sCurrState;
@@ -658,49 +774,7 @@ class Robot : public frc::TimedRobot {
 
       iCallCount++;
    }
-   
- private:
-
-         // Note for future: Need to add a gyro here.
-   WPI_TalonSRX m_motorLSMaster{   0 };   // Left  side drive motor
-   WPI_TalonSRX m_motorRSMaster{   8 };   // Right side drive motor   
-   WPI_VictorSPX m_motorLSSlave1{ 14 };   // Left  side slave motor
-   WPI_VictorSPX m_motorRSSlave1{  1 };   // Right side slave motor
-   WPI_TalonSRX m_motorTopShooter{ 2 };   // top motor on shooter
-   WPI_TalonSRX m_motorBotShooter{ 9 };   // bottom motor on shooter
-
-   int iAutoCount;
-   float drivePowerFactor = 0.8;
-   frc::Joystick m_stick{0};
-   frc::Joystick m_console{1};
-   frc::DifferentialDrive m_drive{ m_motorLSMaster, m_motorRSMaster };
-   //frc::PowerDistributionPanel pdp{0};
-   frc::AnalogInput DistSensor1{0};
-   frc::BuiltInAccelerometer RoborioAccel{};
-
-   std::shared_ptr<NetworkTable> limenttable =
-               nt::NetworkTableInstance::GetDefault().GetTable( "limelight" );
-
-   struct sState {
-      double joyX;
-      double joyY;
-      double conX;
-      double conY;
-      bool   joyButton[12];
-      bool   conButton[13];
-   } sCurrState, sPrevState;
-
-   struct sMotorState LSMotorState, RSMotorState, TSMotorState, BSMotorState;
-
-   bool aBooleanVariable = false;    // just an example of a boolean variable
-   int    iCallCount = 0;
-   double dTimeOfLastCall = 0.0;
-                 /* limelight variables: x: offset from centerline,         */
-                 /*                      y: offset from centerline,         */
-                 /*                      a: area of target, % (0-100),      */
-                 /*                      v: whether the data is valid,      */
-                 /*                      s: skew or rotation, deg (-90-0).  */
-    double limex, limey, limea, limev, limes;
+ 
 };
 
 #ifndef RUNNING_FRC_TESTS
