@@ -23,11 +23,13 @@
 #include "cameraserver/CameraServer.h"
 #include "vision/VisionRunner.h"
 #include <iostream>
+#include <vector>
 #include <networktables/NetworkTable.h>
 #include <networktables/NetworkTableEntry.h>
 #include <networktables/NetworkTableInstance.h>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
 #include <unistd.h>
 #include <sstream>
 
@@ -106,11 +108,67 @@ class Robot : public frc::TimedRobot {
               //frc::CameraServer::GetInstance()->GetVideo();
       cv::Mat source;
       cv::Mat output;
+      cv::Mat hsvImg;
+      cv::Mat threshImg;
+
+      std::vector<float> v3fCircles;  // 3-element vector of floats; this will
+                                      // be the pass-by reference output of
+				      // HoughCircles()
+
+         /* HUE for YELLOW is 21-30.                                         */
+         /* Adjust Saturation and Value depending on the lighting condition  */
+         /* of the environment as well as the surface of the object.         */
+      int     lowH = 21;       // Set Hue
+      int     highH = 30;
+
+      int     lowS = 200;       // Set Saturation
+      int     highS = 255;
+
+      int     lowV = 102;       // Set Value
+      int     highV = 225;
+
       while( true ) {
          usleep( 1000 );                               // wait one millisecond
          if ( cvSink.GrabFrame(source) )
          {
             cvtColor( source, output, cv::COLOR_BGR2GRAY );
+            cvtColor( source, hsvImg, cv::COLOR_BGR2HSV );
+	    cv::inRange( hsvImg, cv::Scalar(lowH, lowS, lowV),
+	                 cv::Scalar(highH, highS, highV), threshImg );
+	                                                          //Blur Effect
+	    cv::GaussianBlur( threshImg, threshImg, cv::Size(3, 3), 0);
+            cv::dilate( threshImg, threshImg, 0 );      // Dilate Filter Effect
+            cv::erode( threshImg, threshImg, 0 );       // Erode Filter Effect
+                     // fill circles vector with all circles in processed image
+                     // HoughCircles() is an algorithm for detecting circles  
+            cv::HoughCircles( threshImg, v3fCircles, CV_HOUGH_GRADIENT, 2,
+			      threshImg.rows / 4, 100, 50, 10, 800);
+
+                                                             // for each circle
+            for ( unsigned int i = 0; i < v3fCircles.size(); i++) {
+               
+                                        // x position of center point of circle
+//             std::cout << "Ball position X = "<< v3fCircles[i][0] <<
+//                ",\tY = "<< v3fCircles[i][1] <<       // y position of center
+//                ",\tRadius = "<< v3fCircles[i][2]<< "\n"; // radius of circle
+
+                        // draw small green circle at center of object detected
+//             cv::circle( output,                    // draw on original image
+//                         cv::Point( (int)v3fCircles[i][0],       // center of
+//                                    (int)v3fCircles[i][1] ),     // circle
+//                         3,                     // radius of circle in pixels
+//                         cv::Scalar(0, 255, 0),                 // draw green
+//                         CV_FILLED );                            // thickness
+
+                                      // draw red circle around object detected 
+//             cv::circle( output,                    // draw on original image
+//                         cv::Point( (int)v3fCircles[i][0],       // center of
+//                                    (int)v3fCircles[i][1] ),     // circle
+//                         (int)v3fCircles[i][2], // radius of circle in pixels
+//                         cv::Scalar(0, 0, 255),                   // draw red
+//                         3 );                                    // thickness
+            } 
+
             outputStreamStd.PutFrame( output );
          }
       }
@@ -583,56 +641,20 @@ class Robot : public frc::TimedRobot {
       motorFindMinMaxVelocity( m_motorTopShooter, LSMotorState );
       motorFindMinMaxVelocity( m_motorBotShooter, BSMotorState );
 
-#ifndef JAGNOTDEFINED
       if ( 0 == iCallCount%100 )  {   // every 2 seconds
-#ifdef JAGNOTDEFINED
          joystickDisplay();
-         cout << "joy: " << m_stick.GetY() << "/" << m_stick.GetX();
-         cout << " (" << sCurrState.joyY << "/" << sCurrState.joyX << " )";
-         cout << endl;
-         cout << "LSMotor: vel/min:max/tgt % A: ";
-         cout << m_motorLSMaster.GetSelectedSensorVelocity()*600/4096 << "/";
-         cout << LSsensorVmin*600/4096 << ":" << LSsensorVmax*600/4096 << "/";
-         cout << LStargetVelocity_UnitsPer100ms*600/4096 << " ";
-         // cout << m_motorLSMaster.GetSelectedSensorPosition() << "/";
-         cout << m_motorLSMaster.GetMotorOutputPercent() << "% ";
-         cout << m_motorLSMaster.GetStatorCurrent();
-         cout << endl;
-         cout << "RSMotor: vel/min:max/tgt % A: ";
-         cout << m_motorRSMaster.GetSelectedSensorVelocity()*600/4096 << "/";
-         cout << RSsensorVmin*600/4096 << ":" << RSsensorVmax*600/4096 << "/";
-         cout << RStargetVelocity_UnitsPer100ms*600/4096 << " ";
-         // cout << m_motorRSMaster.GetSelectedSensorPosition() << "/";
-         cout << m_motorRSMaster.GetMotorOutputPercent() << "% ";
-         cout << m_motorRSMaster.GetStatorCurrent();
-         cout << endl;
+
+         motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
+         motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+
          // max free speed for MinCims is about 6200
          cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
          cout << RoborioAccel.GetY() << "/";
          cout << RoborioAccel.GetZ() << endl;
-         cout << "TopShooter: vel/min:max/tgt % A: ";
-         cout << m_motorTopShooter.GetSelectedSensorVelocity()*600/4096 << "/";
-         // xx cout << TSsensorVmin*600/4096 << ":" << TSsensorVmax*600/4096 << "/";
-         // xx cout << TStargetVelocity_UnitsPer100ms*600/4096 << " ";
-         // cout << m_motorTopShooter.GetSelectedSensorPosition() << "/";
-         cout << m_motorTopShooter.GetMotorOutputPercent() << "% ";
-         cout << m_motorTopShooter.GetStatorCurrent();
-         cout << endl;
-         cout << "BotShooter: vel/min:max/tgt % A: ";
-         cout << m_motorBotShooter.GetSelectedSensorVelocity()*600/4096 << "/";
-         // xx cout << BSsensorVmin*600/4096 << ":" << BSsensorVmax*600/4096 << "/";
-         // xx cout << BStargetVelocity_UnitsPer100ms*600/4096 << " ";
-         // cout << m_motorBotShooter.GetSelectedSensorPosition() << "/";
-         cout << m_motorBotShooter.GetMotorOutputPercent() << "% ";
-         cout << m_motorBotShooter.GetStatorCurrent();
-         cout << endl;
-#endif
-         // motorDisplay( "LS:", m_motorLSMaster,   LSMotorState );
-         // motorDisplay( "RS:", m_motorRSMaster,   RSMotorState );
+
          motorDisplay( "TS:", m_motorTopShooter, TSMotorState );
          motorDisplay( "BS:", m_motorBotShooter, BSMotorState );
       }
-#endif
 
                                        /* Button 1 is the trigger button on */
                                        /* the front of the joystick.        */
