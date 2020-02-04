@@ -23,18 +23,23 @@
 #include "cameraserver/CameraServer.h"
 #include "vision/VisionRunner.h"
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <networktables/NetworkTable.h>
 #include <networktables/NetworkTableEntry.h>
 #include <networktables/NetworkTableInstance.h>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/core/types.hpp>
+#include <opencv2/core.hpp>
 #include <unistd.h>
 #include <sstream>
 
 using std::cout;
 using std::endl;
+using std::setw;
+using std::setfill;              // so we can use "setfill('0') in cout streams
+using namespace cv;
 
 class Robot : public frc::TimedRobot {
  private:
@@ -79,6 +84,16 @@ class Robot : public frc::TimedRobot {
    int    iCallCount = 0;
    double dTimeOfLastCall = 0.0;
 
+ public:
+
+   static struct sPowercellOnVideo {
+      bool SeenByCamera;
+      int  X;
+      int  Y;
+      int  Radius;
+   } powercellOnVideo;
+
+ private:
                  /* limelight variables: x: offset from centerline,         */
                  /*                      y: offset from centerline,         */
                  /*                      a: area of target, % (0-100),      */
@@ -98,10 +113,19 @@ class Robot : public frc::TimedRobot {
       /*        object-detection-and-tracking-color-separation.html          */
       /*---------------------------------------------------------------------*/
    static void VisionThread() {
+      int iBiggestCircleIndex = -1;
+      int iBiggestCircleRadius = -1;
+      
       cs::UsbCamera camera =
                  frc::CameraServer::GetInstance()->StartAutomaticCapture();
          //camera.SetResolution( 640, 480 );
       camera.SetResolution( 160, 120 );
+
+      powercellOnVideo.SeenByCamera = false;  // Make sure no other code thinks
+      powercellOnVideo.X = 0;                 // we see a powercell until we
+      powercellOnVideo.Y = 0;                 // actually see one!
+      powercellOnVideo.Radius = -1;
+
       cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo();
       cs::CvSource outputStreamStd =
               frc::CameraServer::GetInstance()->PutVideo( "Gray", 160, 120 );
@@ -111,69 +135,108 @@ class Robot : public frc::TimedRobot {
       cv::Mat hsvImg;
       cv::Mat threshImg;
 
-      std::vector<float> v3fCircles;  // 3-element vector of floats; this will
-                                      // be the pass-by reference output of
-				      // HoughCircles()
-
+      std::vector<Vec3f> v3fCircles;      // 3-element vector of floats;
+                                          // this will be the pass-by reference
+                                          // output of HoughCircles()
          /* HUE for YELLOW is 21-30.                                         */
          /* Adjust Saturation and Value depending on the lighting condition  */
          /* of the environment as well as the surface of the object.         */
       int     lowH = 21;       // Set Hue
-      int     highH = 30;
+      int     highH = 56;      // (orig: 30)
 
-      int     lowS = 200;       // Set Saturation
+      int     lowS = 60;        // Set Saturation (orig: 200)
       int     highS = 255;
 
-      int     lowV = 102;       // Set Value
-      int     highV = 225;
+      int     lowV = 0;         // Set Value (orig: 102)
+      int     highV = 245;      // (orig: 225)
 
       while( true ) {
+         int iFrameCount = 0;
+
          usleep( 1000 );                               // wait one millisecond
          if ( cvSink.GrabFrame(source) )
          {
+            iFrameCount++;
             cvtColor( source, output, cv::COLOR_BGR2GRAY );
             cvtColor( source, hsvImg, cv::COLOR_BGR2HSV );
-	    cv::inRange( hsvImg, cv::Scalar(lowH, lowS, lowV),
-	                 cv::Scalar(highH, highS, highV), threshImg );
-	                                                          //Blur Effect
-	    cv::GaussianBlur( threshImg, threshImg, cv::Size(3, 3), 0);
+            cv::inRange( hsvImg, cv::Scalar(lowH, lowS, lowV),
+                         cv::Scalar(highH, highS, highV), threshImg );
+                                                                  //Blur Effect
+            cv::GaussianBlur( threshImg, threshImg, cv::Size(9, 9), 0);
             cv::dilate( threshImg, threshImg, 0 );      // Dilate Filter Effect
-            cv::erode( threshImg, threshImg, 0 );       // Erode Filter Effect
+            cv::erode( threshImg, threshImg, 0 );       // Erode  Filter Effect
                      // fill circles vector with all circles in processed image
                      // HoughCircles() is an algorithm for detecting circles  
-            cv::HoughCircles( threshImg, v3fCircles, CV_HOUGH_GRADIENT, 2,
-			      threshImg.rows / 4, 100, 50, 10, 800);
+            cv::HoughCircles( threshImg, v3fCircles, CV_HOUGH_GRADIENT,
+                              2,          // dp: inverse accumulator resolution
+                              threshImg.rows / 2,   // min dist between centers
+                                                    // of the detected circles
+                              100,          // param1 (edge detector threshold)
+                              50,  // p2: increase this to reduce false circles
+                              40,                      // minimum circle radius
+                              240 );                   // maximum circle radius
+                              // was: threshImg.rows / 4, 100, 50, 10, 800 );
+
+            iBiggestCircleIndex = -1;     // init to an impossible index
+            iBiggestCircleRadius = -1;    // init to an impossibly-small radius
 
                                                              // for each circle
-            for ( unsigned int i = 0; i < v3fCircles.size(); i++) {
-               
-                                        // x position of center point of circle
-//             std::cout << "Ball position X = "<< v3fCircles[i][0] <<
-//                ",\tY = "<< v3fCircles[i][1] <<       // y position of center
-//                ",\tRadius = "<< v3fCircles[i][2]<< "\n"; // radius of circle
+            for ( unsigned int i = 0; i < v3fCircles.size(); i++ ) {
 
+               if ( 0 == iFrameCount%300 ) {          // every 10 seconds or so
+                                      // Log the x and y position of the center
+                                      // point of circle, and the radius.
+                  std::cout << "Ball position X = " << v3fCircles[i][0] <<
+                               ",\tY = " << v3fCircles[i][1] <<
+                               ",\tRadius = " << v3fCircles[i][2] <<
+                               " (" << v3fCircles[i][0] - threshImg.cols / 2 <<
+                               ", " << threshImg.rows / 2 - v3fCircles[i][1] <<
+                               ")" << endl;
+               }
+
+                     // if a bigger circle has been found than any found before
+               if ( iBiggestCircleRadius < (int)v3fCircles[i][2] ) {
+                  iBiggestCircleIndex = i;
+                  iBiggestCircleRadius = (int)v3fCircles[i][2];
+               }
                         // draw small green circle at center of object detected
-//             cv::circle( output,                    // draw on original image
-//                         cv::Point( (int)v3fCircles[i][0],       // center of
-//                                    (int)v3fCircles[i][1] ),     // circle
-//                         3,                     // radius of circle in pixels
-//                         cv::Scalar(0, 255, 0),                 // draw green
-//                         CV_FILLED );                            // thickness
+               cv::circle( output,                    // draw on original image
+                           cv::Point( (int)v3fCircles[i][0],       // center of
+                                      (int)v3fCircles[i][1] ),     // circle
+                           3,                     // radius of circle in pixels
+                           cv::Scalar(0, 255, 0),                 // draw green
+                           CV_FILLED );                            // thickness
 
                                       // draw red circle around object detected 
-//             cv::circle( output,                    // draw on original image
-//                         cv::Point( (int)v3fCircles[i][0],       // center of
-//                                    (int)v3fCircles[i][1] ),     // circle
-//                         (int)v3fCircles[i][2], // radius of circle in pixels
-//                         cv::Scalar(0, 0, 255),                   // draw red
-//                         3 );                                    // thickness
-            } 
+               cv::circle( output,                    // draw on original image
+                           cv::Point( (int)v3fCircles[i][0],       // center of
+                                      (int)v3fCircles[i][1] ),     // circle
+                           (int)v3fCircles[i][2], // radius of circle in pixels
+                           cv::Scalar(0, 0, 255),                   // draw red
+                           3 );                                    // thickness
+            }
+
+            if ( -1 < iBiggestCircleIndex ) {  // if at least one ball was seen
+                   // Then save all the info so other code can drive toward it.
+                            // Convert X and Y positions so 0,0 is at center of
+                            // camera image, with X increasing to the right and
+                            // Y increasing up.
+               powercellOnVideo.X = (int)v3fCircles[iBiggestCircleIndex][0] -
+                                                         (int)threshImg.cols/2;
+               powercellOnVideo.Y = (int)threshImg.rows/2 -
+                                       (int)v3fCircles[iBiggestCircleIndex][1];
+               powercellOnVideo.Radius = iBiggestCircleRadius;
+               powercellOnVideo.SeenByCamera = true;
+            } else {
+               powercellOnVideo.SeenByCamera = false;
+            }
 
             outputStreamStd.PutFrame( output );
          }
       }
    }
-    
+
+
       /*---------------------------------------------------------------------*/
       /* GetAllVariables()                                                   */
       /* Retrieves all variable values from sensors, encoders,               */
@@ -202,6 +265,7 @@ class Robot : public frc::TimedRobot {
       limey = limenttable->GetNumber("ty",0.0);  // y position
       limes = limenttable->GetNumber("ts",0.0);  // skew
    }
+
 
       /*---------------------------------------------------------------------*/
       /* DriveToTarget()                                                     */
@@ -267,6 +331,7 @@ class Robot : public frc::TimedRobot {
 
    }  /* DriveToTarget() */
 
+
  public:
 
       /*---------------------------------------------------------------------*/
@@ -274,10 +339,13 @@ class Robot : public frc::TimedRobot {
       /* Display all the joystick values on the console log.                 */
       /*---------------------------------------------------------------------*/
    void joystickDisplay( void ) {
-         cout << "joy: " << m_stick.GetY() << "/" << m_stick.GetX();
-         cout << " (" << sCurrState.joyY << "/" << sCurrState.joyX << " )";
+         cout << "joy: " << setw(8) << m_stick.GetY() << "/" <<
+		            setw(8) << m_stick.GetX();
+         cout << " (" << setw(8) << sCurrState.joyY << "/" <<
+		         setw(8) << sCurrState.joyX << " )";
          cout << endl;
    }
+
 
       /*---------------------------------------------------------------------*/
       /* motorDisplay()                                                      */
@@ -289,16 +357,17 @@ class Robot : public frc::TimedRobot {
                       struct sMotorState & sMState ) {
       double motorVelocity = m_motor.GetSelectedSensorVelocity();
       cout << cTitle << " vel(min:max)tgt/% A (pos): ";
-      cout << motorVelocity*600/4096;
-      cout << "(" << sMState.sensorVmin*600/4096 << ":";
-      cout <<        sMState.sensorVmax*600/4096 << ")";
-      cout << sMState.targetVelocity_UnitsPer100ms*600/4096 << "/ ";
-      cout << m_motor.GetMotorOutputPercent() << "% ";
-      cout << m_motor.GetStatorCurrent() << "A ";
-      cout << "(" << m_motor.GetSelectedSensorPosition() << ")";
+      cout << setw(5) << motorVelocity*600/4096;
+      cout << "(" << setw(5) << sMState.sensorVmin*600/4096 << ":";
+      cout <<        setw(5) << sMState.sensorVmax*600/4096 << ")";
+      cout << setw(5) << sMState.targetVelocity_UnitsPer100ms*600/4096 << "/ ";
+      cout << setw(3) << m_motor.GetMotorOutputPercent() << "% ";
+      cout << setw(5) << m_motor.GetStatorCurrent() << "A ";
+      cout << "(" << setw(10) << m_motor.GetSelectedSensorPosition() << ")";
       cout << endl;
       sMState.sensorVmin = sMState.sensorVmax = motorVelocity;
    }
+
 
       /*---------------------------------------------------------------------*/
       /* motorFindMinMaxVelocity()                                           */
@@ -314,6 +383,238 @@ class Robot : public frc::TimedRobot {
          sMState.sensorVmax = motorVelocity;
       }
    }
+
+
+      /*---------------------------------------------------------------------*/
+      /* RunDriveMotors()                                                    */
+      /* RunDriveMotors() drives the robot.  It uses joystick and console    */
+      /* inputs to determine what the robot should do, and then runs the     */
+      /* m_motorLSMaster and m_motorRSMaster motors to make the robot do it. */
+      /*---------------------------------------------------------------------*/
+   bool RunDriveMotors( void ) {
+      static int iCallCount = 0;
+      iCallCount++;
+
+                  /* If joystick button 2 pressed, use the joystick position */
+                  /* to adjust some variables to specific speeds, so we can  */
+                  /* set the drive motors to those speeds in later code.     */
+      if ( ( 0 == iCallCount%100 )  &&
+           sCurrState.joyButton[2]     ) {
+
+         if ( 0.5 < m_stick.GetY() &&
+              LSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
+            LSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
+         } else if ( m_stick.GetY() < -0.5 &&
+                     -790.0 * 4096 / 600 <
+                                  LSMotorState.targetVelocity_UnitsPer100ms ) {
+            LSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
+         }
+
+         if ( 0.5 < m_stick.GetX() &&
+              RSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
+            RSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
+         } else if ( m_stick.GetX() < -0.5 && 
+                     -790.0 * 4096 / 600 <
+                                  RSMotorState.targetVelocity_UnitsPer100ms ) {
+            RSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
+         }
+      } 
+
+      motorFindMinMaxVelocity( m_motorLSMaster, LSMotorState );
+      motorFindMinMaxVelocity( m_motorRSMaster, RSMotorState );
+
+
+      if ( 0 == iCallCount%100 )  {   // every 2 seconds
+         joystickDisplay();
+
+         motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
+         motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+
+         // max free speed for MinCims is about 6200
+         cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
+         cout << RoborioAccel.GetY() << "/";
+         cout << RoborioAccel.GetZ() << endl;
+      }
+
+                                       /* Button 1 is the trigger button on */
+                                       /* the front of the joystick.        */
+      if ( ( sCurrState.joyButton[1] ) &&       // If driver is pressing the
+         ( 1  == limev )                 ) {    // "drivetotarget" button and
+                                                // the limelight has a target,
+         DriveToTarget();        // then autonomously drive towards the target
+
+                                        /* Button 3 is the topmost center   */
+                                        /* button on the back of joystick.  */
+      } else if ( sCurrState.joyButton[3] ) {
+
+                     /* If button 3 pressed, drive the motors separately    */
+                     /* (rather than with ArcadeDrive) with Percent Output, */
+                     /* using the variables that have been set with the     */
+                     /* joystick while button 3 is pressed.                 */
+         if ( !sPrevState.joyButton[3] ) {  // if button has just been pressed
+            m_drive.StopMotor();
+                                // Set current sensor positions to zero
+            m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
+            m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
+         }
+         // m_motorLSMaster.Set( ControlMode::PercentOutput,
+         //                      -m_stick.GetY() );
+         // m_motorRSMaster.Set( ControlMode::PercentOutput,
+         //                      -m_stick.GetX() );
+                        /* Use MotionMagic to set the position of the drive */
+                        /* wheels, rather than setting their velocity.      */
+         m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
+         m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
+
+                                     /* Button 2 is the bottom-most center  */
+                                     /* button on the back of the joystick. */
+      } else if ( sCurrState.joyButton[2] ) {
+         static int iButtonPressCallCount = 0;
+         if ( !sPrevState.joyButton[2] ) {  // if button has just been pressed
+            m_drive.StopMotor();
+            iButtonPressCallCount = 0;
+         }
+
+         if ( iButtonPressCallCount < 50 ) {       // turn motors on gently...
+            m_motorLSMaster.Set( ControlMode::Velocity,
+                  m_motorLSMaster.GetSelectedSensorVelocity() +
+                     0.2 * ( LSMotorState.targetVelocity_UnitsPer100ms -
+                             m_motorLSMaster.GetSelectedSensorVelocity() ) );
+            m_motorRSMaster.Set( ControlMode::Velocity,
+                  m_motorRSMaster.GetSelectedSensorVelocity() +
+                     0.2 * ( RSMotorState.targetVelocity_UnitsPer100ms -
+                             m_motorRSMaster.GetSelectedSensorVelocity() ) );
+         } else {
+            m_motorLSMaster.Set( ControlMode::Velocity, 
+                                   LSMotorState.targetVelocity_UnitsPer100ms);
+            m_motorRSMaster.Set( ControlMode::Velocity, 
+                                   RSMotorState.targetVelocity_UnitsPer100ms);
+         }
+         iButtonPressCallCount++;
+      } else { 
+                                    /* Drive the robot according to the     */
+                                    /* commanded Y and X joystick position. */
+         m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
+
+                  /* To drive the robot using the drive motor encoders,     */
+                  /* specifying each motor separately, we must              */
+                  /* convert the desired speed to units / 100ms,            */
+                  /* because the velocity setpoint is in units/100ms.       */
+                  /* For example, to convert 500 RPM to units / 100ms:      */
+                  /* 4096 Units/Rev * 500 RPM / 600 100ms/min               */
+                  /* So code to drive the robot at up to 500 rpm in either  */
+                  /* direction could look like this:                        */
+         // double leftMotorOutput, rightMotorOutput;
+         // if ( 0.0 < sCurrState.joyY ) {
+         //    if ( 0.0 < sCurrState.joyX ) {
+         //       leftMotorOutput  = sCurrState.joyY - sCurrState.joyX;
+         //       rightMotorOutput = std::max( sCurrState.joyY, sCurrState.joyX );
+         //    } else {
+         //       leftMotorOutput  = std::max( sCurrState.joyY, -sCurrState.joyX );
+         //       rightMotorOutput = sCurrState.joyY + sCurrState.joyX;
+         //    }
+         //  } else {
+         //    if ( 0.0 < sCurrState.joyX ) {
+         //       leftMotorOutput  = -std::max( -sCurrState.joyY, sCurrState.joyX );
+         //       rightMotorOutput = sCurrState.joyY + sCurrState.joyX;
+         //    } else {
+         //       leftMotorOutput  = sCurrState.joyY - sCurrState.joyX;
+         //       rightMotorOutput = -std::max( -sCurrState.joyY, -sCurrState.joyX );
+         //    }
+         //  }
+         // m_motorLSMaster.Set( ControlMode::Velocity, 
+         //                      leftMotorOutput  * 500.0 * 4096 / 600 );
+         // m_motorRSMaster.Set( ControlMode::Velocity, 
+         //                      rightMotorOutput * 500.0 * 4096 / 600 );
+      }
+      return true;
+   }      // RunDriveMotors()
+
+
+         /*------------------------------------------------------------------*/
+         /* RunShooter()                                                     */
+         /* RunShooter() drives the 2 shooter motors.  It uses joystick and  */
+         /* console inputs to determine what the shooter should do, and then */
+         /* runs the m_motorTopShooter and m_motorBotShooter motors to make  */
+         /* the shooter do it.                                               */
+         /*------------------------------------------------------------------*/
+   bool RunShooter( void ) {
+      static int iCallCount = 0;
+      iCallCount++;
+
+                /* The following code uses the 4 "joystick"-type buttons     */
+                /* on the console to select different speeds                 */
+                /* (targetVelocities) of the top and bottom shooter motors.  */
+      if (   ( 0.5 < sCurrState.conY ) &&     // if console "joystick" is
+            !( 0.5 < sPrevState.conY ) &&     // newly-pressed upward
+           TSMotorState.targetVelocity_UnitsPer100ms < 3000.0 * 4096 / 600 ) {
+         TSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
+      } else if (  ( sCurrState.conY < -0.5 ) &&  // else if newly-pressed
+                  !( sPrevState.conY < -0.5 ) &&  // downward
+                  -3000.0 * 4096 / 600 <
+                                  TSMotorState.targetVelocity_UnitsPer100ms ) {
+         TSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
+      }
+
+      if (  ( 0.5 < sCurrState.conX ) &&     // if console "joystick" is
+           !( 0.5 < sPrevState.conX ) &&     // newly-pressed to right
+           BSMotorState.targetVelocity_UnitsPer100ms < 5000.0 * 4096 / 600 ) {
+         BSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
+      } else if (  ( sCurrState.conX < -0.5 ) &&  // else if newly-pressed
+                  !( sPrevState.conX < -0.5 ) &&  // to the left
+                  -5000.0 * 4096 / 600 <
+                                  BSMotorState.targetVelocity_UnitsPer100ms ) {
+         BSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
+      }
+
+      motorFindMinMaxVelocity( m_motorTopShooter, LSMotorState );
+      motorFindMinMaxVelocity( m_motorBotShooter, BSMotorState );
+
+      if ( 2 == iCallCount%100 )  {   // every 2 seconds
+         motorDisplay( "TS:", m_motorTopShooter, TSMotorState );
+         motorDisplay( "BS:", m_motorBotShooter, BSMotorState );
+      }
+
+      if ( sCurrState.conButton[9] ){    // second-from-leftmost missile switch
+         m_motorTopShooter.Set( ControlMode::Velocity, 
+                                TSMotorState.targetVelocity_UnitsPer100ms );
+         m_motorBotShooter.Set( ControlMode::Velocity, 
+                                BSMotorState.targetVelocity_UnitsPer100ms );
+      } else if ( sCurrState.conButton[12] ) {       // leftmost missile switch
+         static int iButtonPressCallCount = 0;
+
+         if ( !sPrevState.conButton[12] ) {     // if switch was just turned on
+            iButtonPressCallCount = 0;
+         }
+
+         if ( iButtonPressCallCount < 50 ) {
+
+            m_motorTopShooter.Set( ControlMode::Velocity,
+                  m_motorTopShooter.GetSelectedSensorVelocity() +
+                     0.2 * ( TSMotorState.targetVelocity_UnitsPer100ms -
+                             m_motorTopShooter.GetSelectedSensorVelocity() ) );
+            m_motorBotShooter.Set( ControlMode::Velocity,
+                  m_motorBotShooter.GetSelectedSensorVelocity() +
+                     0.2 * ( BSMotorState.targetVelocity_UnitsPer100ms -
+                             m_motorBotShooter.GetSelectedSensorVelocity() ) );
+         } else {
+            m_motorTopShooter.Set( ControlMode::Velocity, 
+                                   TSMotorState.targetVelocity_UnitsPer100ms);
+            m_motorBotShooter.Set( ControlMode::Velocity, 
+                                   BSMotorState.targetVelocity_UnitsPer100ms);
+         }
+         iButtonPressCallCount++;
+         
+      } else {
+                                      // slow down slowly, over about 2 seconds
+         m_motorTopShooter.Set( ControlMode::Velocity,
+                         0.8 * m_motorTopShooter.GetSelectedSensorVelocity() );
+         m_motorBotShooter.Set(ControlMode::Velocity,
+                         0.8 * m_motorBotShooter.GetSelectedSensorVelocity() );
+      }
+      return true;
+   }     // RunShooter()
+
 
       /*---------------------------------------------------------------------*/
       /* motorInit()                                                         */
@@ -396,6 +697,7 @@ class Robot : public frc::TimedRobot {
       m_motor.ConfigOpenloopRamp(  0.0);
    }
 
+
       /*---------------------------------------------------------------------*/
       /* RobotInit()                                                         */
       /* This function is called once when the robot is powered up.          */
@@ -403,9 +705,15 @@ class Robot : public frc::TimedRobot {
       /* be used in Autonomous or Teleop modes.                              */
       /*---------------------------------------------------------------------*/
    void RobotInit() {
+      static int iRobotInitCallCount = 0;
+
+      iRobotInitCallCount++;
+
+      if ( 1 == iRobotInitCallCount ) {
                                 // start a thread processing USB camera images
-      std::thread visionThread(VisionThread);
-      visionThread.detach();
+         std::thread visionThread(VisionThread);
+         visionThread.detach();
+      }
 
       m_motorLSSlave1.Follow(m_motorLSMaster);
       m_motorRSSlave1.Follow(m_motorRSMaster);
@@ -434,12 +742,14 @@ class Robot : public frc::TimedRobot {
          m_motorLSMaster.Config_kP( 0, 0.2,    10 );   // RPMs above ~200
          m_motorLSMaster.Config_kI( 0, 0.0002, 10 );
          m_motorLSMaster.Config_kD( 0, 10.0,   10 );
+         cout << "LSMaster encoder is okay" << endl;
       } else {
          m_motorLSMaster.SelectProfileSlot( 0, 0 );
          m_motorLSMaster.Config_kF( 0, 0.15, 10 );   // may have to be higher
          m_motorLSMaster.Config_kP( 0, 0.0,  10 );
          m_motorLSMaster.Config_kI( 0, 0.0,  10 );
          m_motorLSMaster.Config_kD( 0, 0.0,  10 );
+         cout << "LSMaster encoder is DISCONNECTED" << endl;
       }
 
                                                     // if encoder is connected
@@ -450,12 +760,15 @@ class Robot : public frc::TimedRobot {
          m_motorRSMaster.Config_kP( 0, 0.2,    10 );   // RPMs above ~200
          m_motorRSMaster.Config_kI( 0, 0.0002, 10 );
          m_motorRSMaster.Config_kD( 0, 10.0,   10 );
+         cout << "RSMaster encoder is okay" << endl;
+
       } else {
          m_motorRSMaster.SelectProfileSlot( 0, 0 );
          m_motorRSMaster.Config_kF( 0, 0.15, 10 );   // may have to be higher
          m_motorRSMaster.Config_kP( 0, 0.0,  10 );
          m_motorRSMaster.Config_kI( 0, 0.0,  10 );
          m_motorRSMaster.Config_kD( 0, 0.0,  10 );
+         cout << "RSMaster encoder is DISCONNECTED" << endl;
       }
 
                                                      // if encoder is connected
@@ -489,7 +802,9 @@ class Robot : public frc::TimedRobot {
          m_motorBotShooter.Config_kI( 0, 0.0,  10 );
          m_motorBotShooter.Config_kD( 0, 0.0,  10 );
       }
+      iCallCount++;
    }
+
 
       /*---------------------------------------------------------------------*/
       /* DisabledInit()                                                      */
@@ -498,17 +813,18 @@ class Robot : public frc::TimedRobot {
    void DisabledInit() override {
    }
 
+
       /*---------------------------------------------------------------------*/
       /* AutonomousInit()                                                    */
       /* This function is called once when the robot enters Autonomous mode. */
       /*---------------------------------------------------------------------*/
    void AutonomousInit() override {
+      RobotInit();
       cout << "shoot 3 balls" << endl;
       m_drive.StopMotor();
       iCallCount=0;
-      m_motorLSSlave1.Follow(m_motorLSMaster);
-      m_motorRSSlave1.Follow(m_motorRSMaster);
    }
+
 
       /*---------------------------------------------------------------------*/
       /* AutonomousPeriodic()                                                */
@@ -528,25 +844,19 @@ class Robot : public frc::TimedRobot {
       LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
       RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
 
-      if (iCallCount<50) {
-         LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-      } else if (iCallCount<100) {
-         LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
-      } else if (iCallCount<400) {
-         LSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-      } else if (iCallCount<1500) {
-         m_motorLSMaster.Config_kF( 0, 0.90, 10 );      // 0.15 normally
-         m_motorLSMaster.Config_kP( 0, 0.2,  10 );      // 0.2  normally
-         m_motorRSMaster.Config_kF( 0, 1.20, 10 );
-         m_motorRSMaster.Config_kP( 0, 0.2,  10 );
-         LSMotorState.targetVelocity_UnitsPer100ms = 20.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms =-20.0 * 4096 / 600;
-      } else if (iCallCount<2000) {
-         LSMotorState.targetVelocity_UnitsPer100ms = -10.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms =  10.0 * 4096 / 600;
+      if (iCallCount<90) {
+         if ( sCurrState.conButton[10] ) {
+            LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+         } else if ( sCurrState.conButton[11] ) {
+            LSMotorState.targetVelocity_UnitsPer100ms = -100.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = -100.0 * 4096 / 600;
+         } else { 
+            iCallCount=90;
+         }
+      } else if ( iCallCount<180 ) {
+         LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+         RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
       } else {
          m_motorLSMaster.Config_kF( 0, 0.15, 10 );     // 0.15 normally
          m_motorRSMaster.Config_kF( 0, 0.15, 10 );
@@ -568,17 +878,18 @@ class Robot : public frc::TimedRobot {
       }
    }
 
+
       /*---------------------------------------------------------------------*/
       /* TeleopInit()                                                        */
       /* This function is called once when the robot enters Teleop mode.     */
       /*---------------------------------------------------------------------*/
    void TeleopInit() override {
-      m_motorLSSlave1.Follow(m_motorLSMaster);
-      m_motorRSSlave1.Follow(m_motorRSMaster);
+      RobotInit();
                                                     // zero the drive encoders
       m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
       m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
    }
+
 
       /*---------------------------------------------------------------------*/
       /* TeleopPeriodic()                                                    */
@@ -590,201 +901,10 @@ class Robot : public frc::TimedRobot {
       GetAllVariables();  // this is necessary if we use any
                           // of the Canbus variables.
 
-      if ( ( 0 == iCallCount%100 )  &&
-           sCurrState.joyButton[2]     ) {
+      RunDriveMotors();
 
-         if ( 0.5 < m_stick.GetY() &&
-              LSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
-            LSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
-         } else if ( m_stick.GetY() < -0.5 &&
-                     -790.0 * 4096 / 600 <
-		                  LSMotorState.targetVelocity_UnitsPer100ms ) {
-            LSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
-         }
+      RunShooter();
 
-         if ( 0.5 < m_stick.GetX() &&
-              RSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
-            RSMotorState.targetVelocity_UnitsPer100ms += 200.0 * 4096 / 600;
-         } else if ( m_stick.GetX() < -0.5 && 
-                     -790.0 * 4096 / 600 <
-		                  RSMotorState.targetVelocity_UnitsPer100ms ) {
-            RSMotorState.targetVelocity_UnitsPer100ms -= 200.0 * 4096 / 600;
-         }
-      }
-               /* The following code uses the 4 "joystick"-type buttons     */
-               /* on the console to select different speeds                 */
-               /* (targetVelocities) of the top and bottom shooter motors.  */
-      if (   ( 0.5 < sCurrState.conY ) &&     // if console "joystick" is
-            !( 0.5 < sPrevState.conY ) &&     // newly-pressed upward
-           TSMotorState.targetVelocity_UnitsPer100ms < 3000.0 * 4096 / 600 ) {
-         TSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
-      } else if (  ( sCurrState.conY < -0.5 ) &&  // else if newly-pressed
-                  !( sPrevState.conY < -0.5 ) &&  // downward
-                  -3000.0 * 4096 / 600 <
-		                  TSMotorState.targetVelocity_UnitsPer100ms ) {
-         TSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
-      }
-
-      if (  ( 0.5 < sCurrState.conX ) &&     // if console "joystick" is
-           !( 0.5 < sPrevState.conX ) &&     // newly-pressed to right
-           BSMotorState.targetVelocity_UnitsPer100ms < 5000.0 * 4096 / 600 ) {
-         BSMotorState.targetVelocity_UnitsPer100ms += 100.0 * 4096 / 600;
-      } else if (  ( sCurrState.conX < -0.5 ) &&  // else if newly-pressed
-                  !( sPrevState.conX < -0.5 ) &&  // to the left
-                  -5000.0 * 4096 / 600 <
-		                  BSMotorState.targetVelocity_UnitsPer100ms ) {
-         BSMotorState.targetVelocity_UnitsPer100ms -= 100.0 * 4096 / 600;
-      }
-
-      motorFindMinMaxVelocity( m_motorLSMaster, LSMotorState );
-      motorFindMinMaxVelocity( m_motorRSMaster, RSMotorState );
-      motorFindMinMaxVelocity( m_motorTopShooter, LSMotorState );
-      motorFindMinMaxVelocity( m_motorBotShooter, BSMotorState );
-
-      if ( 0 == iCallCount%100 )  {   // every 2 seconds
-         joystickDisplay();
-
-         motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
-         motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
-
-         // max free speed for MinCims is about 6200
-         cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
-         cout << RoborioAccel.GetY() << "/";
-         cout << RoborioAccel.GetZ() << endl;
-
-         motorDisplay( "TS:", m_motorTopShooter, TSMotorState );
-         motorDisplay( "BS:", m_motorBotShooter, BSMotorState );
-      }
-
-                                       /* Button 1 is the trigger button on */
-                                       /* the front of the joystick.        */
-      if ( ( sCurrState.joyButton[1] ) &&       // If driver is pressing the
-         ( 1  == limev )                 ) {    // "drivetotarget" button and
-                                                // the limelight has a target,
-         DriveToTarget();        // then autonomously drive towards the target
-
-                                        /* Button 3 is the topmost center   */
-                                        /* button on the back of joystick.  */
-      } else if ( sCurrState.joyButton[3] ) {
-
-                     /* If button 3 pressed, drive the motors separately    */
-	             /* (rather than with ArcadeDrive) with Percent Output, */
-	             /* using the variables that have been set with the     */
-	             /* joystick while button 3 is pressed.                 */
-         if ( !sPrevState.joyButton[3] ) {  // if button has just been pressed
-            m_drive.StopMotor();
-                                // Set current sensor positions to zero
-            m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
-            m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
-         }
-         // m_motorLSMaster.Set( ControlMode::PercentOutput,
-         //                      -m_stick.GetY() );
-         // m_motorRSMaster.Set( ControlMode::PercentOutput,
-         //                      -m_stick.GetX() );
-	                /* Use MotionMagic to set the position of the drive */
-	                /* wheels, rather than setting their velocity.      */
-         m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
-         m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
-
-                                     /* Button 2 is the bottom-most center  */
-                                     /* button on the back of the joystick. */
-      } else if ( sCurrState.joyButton[2] ) {
-         static int iButtonPressCallCount = 0;
-         if ( !sPrevState.joyButton[2] ) {  // if button has just been pressed
-            m_drive.StopMotor();
-            iButtonPressCallCount = 0;
-         }
-
-         if ( iButtonPressCallCount < 50 ) {       // turn motors on gently...
-            m_motorLSMaster.Set( ControlMode::Velocity,
-                  m_motorLSMaster.GetSelectedSensorVelocity() +
-                     0.2 * ( LSMotorState.targetVelocity_UnitsPer100ms -
-                             m_motorLSMaster.GetSelectedSensorVelocity() ) );
-            m_motorRSMaster.Set( ControlMode::Velocity,
-                  m_motorRSMaster.GetSelectedSensorVelocity() +
-                     0.2 * ( RSMotorState.targetVelocity_UnitsPer100ms -
-                             m_motorRSMaster.GetSelectedSensorVelocity() ) );
-         } else {
-            m_motorLSMaster.Set( ControlMode::Velocity, 
-                                   LSMotorState.targetVelocity_UnitsPer100ms);
-            m_motorRSMaster.Set( ControlMode::Velocity, 
-                                   RSMotorState.targetVelocity_UnitsPer100ms);
-         }
-         iButtonPressCallCount++;
-      } else { 
-                                    /* Drive the robot according to the     */
-                                    /* commanded Y and X joystick position. */
-         m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
-
-                  /* To drive the robot using the drive motor encoders,     */
-                  /* specifying each motor separately, we must              */
-                  /* convert the desired speed to units / 100ms,            */
-                  /* because the velocity setpoint is in units/100ms.       */
-                  /* For example, to convert 500 RPM to units / 100ms:      */
-                  /* 4096 Units/Rev * 500 RPM / 600 100ms/min               */
-                  /* So code to drive the robot at up to 500 rpm in either  */
-                  /* direction could look like this:                        */
-         // double leftMotorOutput, rightMotorOutput;
-         // if ( 0.0 < sCurrState.joyY ) {
-         //    if ( 0.0 < sCurrState.joyX ) {
-         //       leftMotorOutput  = sCurrState.joyY - sCurrState.joyX;
-         //       rightMotorOutput = std::max( sCurrState.joyY, sCurrState.joyX );
-         //    } else {
-         //       leftMotorOutput  = std::max( sCurrState.joyY, -sCurrState.joyX );
-         //       rightMotorOutput = sCurrState.joyY + sCurrState.joyX;
-         //    }
-         //  } else {
-         //    if ( 0.0 < sCurrState.joyX ) {
-         //       leftMotorOutput  = -std::max( -sCurrState.joyY, sCurrState.joyX );
-         //       rightMotorOutput = sCurrState.joyY + sCurrState.joyX;
-         //    } else {
-         //       leftMotorOutput  = sCurrState.joyY - sCurrState.joyX;
-         //       rightMotorOutput = -std::max( -sCurrState.joyY, -sCurrState.joyX );
-         //    }
-         //  }
-         // m_motorLSMaster.Set( ControlMode::Velocity, 
-         //                      leftMotorOutput  * 500.0 * 4096 / 600 );
-         // m_motorRSMaster.Set( ControlMode::Velocity, 
-         //                      rightMotorOutput * 500.0 * 4096 / 600 );
-      }
-
-      if ( sCurrState.conButton[9] ){    // second-from-leftmost missile switch
-         m_motorTopShooter.Set( ControlMode::Velocity, 
-                                TSMotorState.targetVelocity_UnitsPer100ms );
-         m_motorBotShooter.Set( ControlMode::Velocity, 
-                                BSMotorState.targetVelocity_UnitsPer100ms );
-      } else if ( sCurrState.conButton[12] ) {       // leftmost missile switch
-         static int iButtonPressCallCount = 0;
-
-         if ( !sPrevState.conButton[12] ) {     // if switch was just turned on
-            iButtonPressCallCount = 0;
-         }
-
-         if ( iButtonPressCallCount < 50 ) {
-
-            m_motorTopShooter.Set( ControlMode::Velocity,
-                  m_motorTopShooter.GetSelectedSensorVelocity() +
-                     0.2 * ( TSMotorState.targetVelocity_UnitsPer100ms -
-                             m_motorTopShooter.GetSelectedSensorVelocity() ) );
-            m_motorBotShooter.Set( ControlMode::Velocity,
-                  m_motorBotShooter.GetSelectedSensorVelocity() +
-                     0.2 * ( BSMotorState.targetVelocity_UnitsPer100ms -
-                             m_motorBotShooter.GetSelectedSensorVelocity() ) );
-         } else {
-            m_motorTopShooter.Set( ControlMode::Velocity, 
-                                   TSMotorState.targetVelocity_UnitsPer100ms);
-            m_motorBotShooter.Set( ControlMode::Velocity, 
-                                   BSMotorState.targetVelocity_UnitsPer100ms);
-         }
-         iButtonPressCallCount++;
-         
-      } else {
-                                      // slow down slowly, over about 2 seconds
-         m_motorTopShooter.Set( ControlMode::Velocity,
-                         0.8 * m_motorTopShooter.GetSelectedSensorVelocity() );
-         m_motorBotShooter.Set(ControlMode::Velocity,
-                         0.8 * m_motorBotShooter.GetSelectedSensorVelocity() );
-      }
 
       sPrevState = sCurrState;
 
@@ -798,6 +918,9 @@ class Robot : public frc::TimedRobot {
    }
  
 };
+
+
+Robot::sPowercellOnVideo Robot::powercellOnVideo = { true, 0, 0, -1 };
 
 #ifndef RUNNING_FRC_TESTS
 int main() { return frc::StartRobot<Robot>(); }
