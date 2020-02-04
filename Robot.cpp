@@ -113,13 +113,18 @@ class Robot : public frc::TimedRobot {
       /*        object-detection-and-tracking-color-separation.html          */
       /*---------------------------------------------------------------------*/
    static void VisionThread() {
+      static double dTimeOfLastCall;
+
       int iBiggestCircleIndex = -1;
       int iBiggestCircleRadius = -1;
+
+
       
       cs::UsbCamera camera =
                  frc::CameraServer::GetInstance()->StartAutomaticCapture();
          //camera.SetResolution( 640, 480 );
-      camera.SetResolution( 160, 120 );
+      //camera.SetResolution( 160, 120 );
+      camera.SetResolution( 320, 240 );
 
       powercellOnVideo.SeenByCamera = false;  // Make sure no other code thinks
       powercellOnVideo.X = 0;                 // we see a powercell until we
@@ -151,11 +156,12 @@ class Robot : public frc::TimedRobot {
       int     highV = 245;      // (orig: 225)
 
       while( true ) {
-         int iFrameCount = 0;
+         static int iFrameCount = 0;
 
          usleep( 1000 );                               // wait one millisecond
          if ( cvSink.GrabFrame(source) )
          {
+            dTimeOfLastCall = frc::GetTime();
             iFrameCount++;
             cvtColor( source, output, cv::COLOR_BGR2GRAY );
             cvtColor( source, hsvImg, cv::COLOR_BGR2HSV );
@@ -172,8 +178,8 @@ class Robot : public frc::TimedRobot {
                               threshImg.rows / 2,   // min dist between centers
                                                     // of the detected circles
                               100,          // param1 (edge detector threshold)
-                              50,  // p2: increase this to reduce false circles
-                              40,                      // minimum circle radius
+                              85,  // p2: increase this to reduce false circles
+                              30,                      // minimum circle radius
                               240 );                   // maximum circle radius
                               // was: threshImg.rows / 4, 100, 50, 10, 800 );
 
@@ -192,6 +198,9 @@ class Robot : public frc::TimedRobot {
                                " (" << v3fCircles[i][0] - threshImg.cols / 2 <<
                                ", " << threshImg.rows / 2 - v3fCircles[i][1] <<
                                ")" << endl;
+                  std::cout << "Vision Processing duration: ";
+                  std::cout << frc::GetTime() - dTimeOfLastCall << endl;
+                                  // use frc:Timer::GetFPGATimestamp() instead?
                }
 
                      // if a bigger circle has been found than any found before
@@ -232,6 +241,7 @@ class Robot : public frc::TimedRobot {
             }
 
             outputStreamStd.PutFrame( output );
+            v3fCircles.clear();
          }
       }
    }
@@ -331,6 +341,71 @@ class Robot : public frc::TimedRobot {
 
    }  /* DriveToTarget() */
 
+ /*---------------------------------------------------------------------*/
+      /* DriveToPowercell()                                                     */
+      /* DriveToPowercell() drives autonomously towards a vision target.        */
+      /* It returns true if the usb vision data has detected a power cell, 
+      false otherwise.    */
+      /*---------------------------------------------------------------------*/
+   bool DriveToPowercell()  {
+
+      bool returnVal = true;
+      static int  iCallCount = 0;
+
+      iCallCount++;
+
+      if ( powercellOnVideo.SeenByCamera )  {                       // if limelight data is valid
+         double autoDriveSpeed;
+             // limea is the area of the target seen by the limelight camera
+             // and is in percent (between 0 and 100) of the whole screen area.
+             // limey is the height above the center of the field of view
+             // Could change the if/else statements below to calculate
+             // autoDriveSpeed by using a math expression based on limey.
+         if        ( 80 < powercellOnVideo.Radius ) {
+            autoDriveSpeed = -0.15;
+         } else if (  70 < powercellOnVideo.Radius )  { // if we're really close...
+            autoDriveSpeed = 0.0;    //   stop (or 0.08 to go slow)
+         } else if (  50 < powercellOnVideo.Radius ) {  // if we're a little farther...
+            autoDriveSpeed = 0.12;    //   go a little faster
+         } else if (  25 < powercellOnVideo.Radius ) {  // if we're farther still...
+            autoDriveSpeed = 0.15;   //   go a little faster still
+         } else {                    // else we must be really far...
+            autoDriveSpeed = 0.20;   //   go as fast as we dare
+         }
+
+                          // LATER: May want to modify autoDriveSpeed depending
+                          // on the distance from the target determined
+                          // by sonar transducers.
+
+         // May have to add/subtract a constant from limex here, to account
+         // for the offset of the camera away from the centerline of the robot.
+         if ( aBooleanVariable ) {
+            m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+         } else if ( 0 <= powercellOnVideo.X )  {
+                             // if target to the right, turn towards the right
+            m_drive.CurvatureDrive( -autoDriveSpeed, -(powercellOnVideo.X/300.0), 1 );
+         } else if ( powercellOnVideo.X < 0 ) {
+                               // if target to the left, turn towards the left
+            m_drive.CurvatureDrive( -autoDriveSpeed, -(powercellOnVideo.X/300.0), 1 );
+         } else {
+            m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+         }
+
+      } else {                    // else limelight data is not valid any more
+         // should we continue forward here?
+         m_drive.CurvatureDrive( 0.0, 0, 0 );                // stop the robot
+         returnVal = false;
+      }
+
+      if ( 0 == iCallCount%100 )  {
+         cout << "lime: " << powercellOnVideo.SeenByCamera << ":" << powercellOnVideo.X << "/" << powercellOnVideo.Y;
+         cout << ", " << powercellOnVideo.Radius  << "." << endl;
+      }
+
+      return returnVal;
+
+   }  /* DriveToPowercell() */
+
 
  public:
 
@@ -339,11 +414,8 @@ class Robot : public frc::TimedRobot {
       /* Display all the joystick values on the console log.                 */
       /*---------------------------------------------------------------------*/
    void joystickDisplay( void ) {
-         cout << "joy: " << setw(8) << m_stick.GetY() << "/" <<
-		            setw(8) << m_stick.GetX();
-         cout << " (" << setw(8) << sCurrState.joyY << "/" <<
-		         setw(8) << sCurrState.joyX << " )";
-         cout << endl;
+         cout << "joy (y/x): " << setw(8) << sCurrState.joyY << "/" <<
+		         setw(8) << sCurrState.joyX << endl;
    }
 
 
@@ -442,7 +514,13 @@ class Robot : public frc::TimedRobot {
          ( 1  == limev )                 ) {    // "drivetotarget" button and
                                                 // the limelight has a target,
          DriveToTarget();        // then autonomously drive towards the target
-
+                                 /* Button 1 is the trigger button on */
+                                       /* the front of the joystick.        */
+      } else if ( ( sCurrState.joyButton[6] ) &&       // If driver is pressing the
+                  ( sCurrState.joyButton[1] ) &&
+                  ( powercellOnVideo.SeenByCamera ) ) {    // "drivetotarget" button and
+                                                // the limelight has a target,
+         DriveToPowercell();        // then autonomously drive towards the target
                                         /* Button 3 is the topmost center   */
                                         /* button on the back of joystick.  */
       } else if ( sCurrState.joyButton[3] ) {
