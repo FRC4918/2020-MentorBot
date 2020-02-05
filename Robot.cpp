@@ -394,11 +394,11 @@ class Robot : public frc::TimedRobot {
          if        ( 0 <= powercellOnVideo.X ) {
                              // if target to the right, turn towards the right
             m_drive.CurvatureDrive( -autoDriveSpeed,
-			            -(powercellOnVideo.X/300.0), 1 );
+                                    -(powercellOnVideo.X/300.0), 1 );
          } else if ( powercellOnVideo.X < 0 ) {
                                // if target to the left, turn towards the left
             m_drive.CurvatureDrive( -autoDriveSpeed,
-			            -(powercellOnVideo.X/300.0), 1 );
+                                    -(powercellOnVideo.X/300.0), 1 );
          } else {
             m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
          }
@@ -411,7 +411,7 @@ class Robot : public frc::TimedRobot {
 
       if ( 0 == iCallCount%100 )  {
          cout << "Powercell Seen flag " << powercellOnVideo.SeenByCamera <<
-		 ": " << powercellOnVideo.X << "/" << powercellOnVideo.Y;
+                 ": " << powercellOnVideo.X << "/" << powercellOnVideo.Y;
          cout << ", " << powercellOnVideo.Radius  << "." << endl;
       }
 
@@ -428,7 +428,7 @@ class Robot : public frc::TimedRobot {
       /*---------------------------------------------------------------------*/
    void joystickDisplay( void ) {
          cout << "joy (y/x): " << setw(8) << sCurrState.joyY << "/" <<
-		         setw(8) << sCurrState.joyX << endl;
+                 setw(8) << sCurrState.joyX << endl;
    }
 
 
@@ -527,13 +527,15 @@ class Robot : public frc::TimedRobot {
          ( 1  == limev )                 ) {    // "drivetotarget" button and
                                                 // the limelight has a target,
          DriveToTarget();        // then autonomously drive towards the target
-                                 /* Button 1 is the trigger button on */
-                                       /* the front of the joystick.        */
-      } else if ( ( sCurrState.joyButton[6] ) &&       // If driver is pressing the
-                  ( sCurrState.joyButton[1] ) &&
-                  ( powercellOnVideo.SeenByCamera ) ) {    // "drivetotarget" button and
-                                                // the limelight has a target,
-         DriveToPowercell();        // then autonomously drive towards the target
+
+                                 /* Button 6 is the button on the           */
+                                 /* front-left of the base of the joystick. */
+      } else if ( ( sCurrState.joyButton[6] ) &&      // If driver is pressing
+                  ( sCurrState.joyButton[1] ) &&      // buttons 6 AND 1, and
+                  ( powercellOnVideo.SeenByCamera ) ) {      // the USB camera
+                                                      // has seen a powercell,
+         DriveToPowercell();  // then autonomously drive towards the powercell
+
                                         /* Button 3 is the topmost center   */
                                         /* button on the back of joystick.  */
       } else if ( sCurrState.joyButton[3] ) {
