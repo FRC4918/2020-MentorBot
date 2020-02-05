@@ -122,9 +122,9 @@ class Robot : public frc::TimedRobot {
       
       cs::UsbCamera camera =
                  frc::CameraServer::GetInstance()->StartAutomaticCapture();
-         //camera.SetResolution( 640, 480 );
-      //camera.SetResolution( 160, 120 );
-      camera.SetResolution( 320, 240 );
+         //camera.SetResolution( 640, 480 );   // too detailed and slow
+         //camera.SetResolution( 160, 120 );   // too coarse
+      camera.SetResolution( 320, 240 );        // just right
 
       powercellOnVideo.SeenByCamera = false;  // Make sure no other code thinks
       powercellOnVideo.X = 0;                 // we see a powercell until we
@@ -149,11 +149,11 @@ class Robot : public frc::TimedRobot {
       int     lowH = 21;       // Set Hue
       int     highH = 56;      // (orig: 30)
 
-      int     lowS = 60;        // Set Saturation (orig: 200)
+      int     lowS = 30;        // Set Saturation (orig: 200)
       int     highS = 255;
 
       int     lowV = 0;         // Set Value (orig: 102)
-      int     highV = 245;      // (orig: 225)
+      int     highV = 255;      // (orig: 225)
 
       while( true ) {
          static int iFrameCount = 0;
@@ -178,9 +178,9 @@ class Robot : public frc::TimedRobot {
                               threshImg.rows / 2,   // min dist between centers
                                                     // of the detected circles
                               100,          // param1 (edge detector threshold)
-                              85,  // p2: increase this to reduce false circles
-                              30,                      // minimum circle radius
-                              240 );                   // maximum circle radius
+                              84,  // p2: increase this to reduce false circles
+                              20,                      // minimum circle radius
+                              70 );                    // maximum circle radius
                               // was: threshImg.rows / 4, 100, 50, 10, 800 );
 
             iBiggestCircleIndex = -1;     // init to an impossible index
@@ -209,7 +209,7 @@ class Robot : public frc::TimedRobot {
                   iBiggestCircleRadius = (int)v3fCircles[i][2];
                }
                         // draw small green circle at center of object detected
-               cv::circle( output,                    // draw on original image
+               cv::circle( threshImg,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            3,                     // radius of circle in pixels
@@ -217,7 +217,7 @@ class Robot : public frc::TimedRobot {
                            CV_FILLED );                            // thickness
 
                                       // draw red circle around object detected 
-               cv::circle( output,                    // draw on original image
+               cv::circle( threshImg,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            (int)v3fCircles[i][2], // radius of circle in pixels
@@ -240,7 +240,8 @@ class Robot : public frc::TimedRobot {
                powercellOnVideo.SeenByCamera = false;
             }
 
-            outputStreamStd.PutFrame( output );
+            //outputStreamStd.PutFrame( output );
+            outputStreamStd.PutFrame( threshImg );
             v3fCircles.clear();
          }
       }
@@ -341,11 +342,11 @@ class Robot : public frc::TimedRobot {
 
    }  /* DriveToTarget() */
 
- /*---------------------------------------------------------------------*/
-      /* DriveToPowercell()                                                     */
-      /* DriveToPowercell() drives autonomously towards a vision target.        */
-      /* It returns true if the usb vision data has detected a power cell, 
-      false otherwise.    */
+      /*---------------------------------------------------------------------*/
+      /* DriveToPowercell()                                                  */
+      /* DriveToPowercell() drives autonomously towards a vision target.     */
+      /* It returns true if the usb vision data has detected a power cell,   */
+      /* false otherwise.                                                    */
       /*---------------------------------------------------------------------*/
    bool DriveToPowercell()  {
 
@@ -354,51 +355,63 @@ class Robot : public frc::TimedRobot {
 
       iCallCount++;
 
-      if ( powercellOnVideo.SeenByCamera )  {                       // if limelight data is valid
+      if ( powercellOnVideo.SeenByCamera ) {      // if USB video data is valid
          double autoDriveSpeed;
-             // limea is the area of the target seen by the limelight camera
-             // and is in percent (between 0 and 100) of the whole screen area.
-             // limey is the height above the center of the field of view
-             // Could change the if/else statements below to calculate
-             // autoDriveSpeed by using a math expression based on limey.
-         if        ( 80 < powercellOnVideo.Radius ) {
-            autoDriveSpeed = -0.15;
-         } else if (  70 < powercellOnVideo.Radius )  { // if we're really close...
-            autoDriveSpeed = 0.0;    //   stop (or 0.08 to go slow)
-         } else if (  50 < powercellOnVideo.Radius ) {  // if we're a little farther...
+             // If powercellOnVideo.SeenByCamera is true, that means that the
+             // vision-processing code in VisionThread() has found a yellow
+             // circle in the latest video frame from the USB videocamera (and
+             // we hope that yellow circle is a powercell).
+             // powercellOnVideo.Y is the Y-position in the video frame of the
+             //    powercell; the range is from -120 to +120 (pixels).
+             // powercellOnVideo.X is the X-position in the video frame of the
+             //    powercell; the range is from -160 to +160 (pixels).
+             // powercellOnVideo.Radius is the radius of the powercell;
+             //    the range is from 20 to 70 (pixels).
+             // In the code below, we use those powercellOnVideo values to
+             // determine how fast and in which direction to drive, to go
+             // towards the powercell.
+             // We could change the if/else statements below to calculate
+             // autoDriveSpeed by using a math expression based on
+             // powercellOnVideo.Y values.
+         if        ( powercellOnVideo.Y < -50 ) {  // if we're super close
+            autoDriveSpeed = -0.15;   //   go backward slowly
+         } else if ( powercellOnVideo.Y < -30 )  { // if we're really close...
+            autoDriveSpeed = 0.0;     //   stop (or 0.08 to go slow)
+         } else if ( powercellOnVideo.Y < -10 ) {  // if we're a little farther
             autoDriveSpeed = 0.12;    //   go a little faster
-         } else if (  25 < powercellOnVideo.Radius ) {  // if we're farther still...
-            autoDriveSpeed = 0.15;   //   go a little faster still
-         } else {                    // else we must be really far...
-            autoDriveSpeed = 0.20;   //   go as fast as we dare
+         } else if (  powercellOnVideo.Y < 20 ) {  // if we're farther still...
+            autoDriveSpeed = 0.15;    //   go a little faster still
+         } else {                     // else we must be really far...
+            autoDriveSpeed = 0.20;    //   go as fast as we dare
          }
 
                           // LATER: May want to modify autoDriveSpeed depending
                           // on the distance from the target determined
                           // by sonar transducers.
 
-         // May have to add/subtract a constant from limex here, to account
+         // May have to add/subtract a constant from x-values here, to account
          // for the offset of the camera away from the centerline of the robot.
-         if ( aBooleanVariable ) {
-            m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
-         } else if ( 0 <= powercellOnVideo.X )  {
+         if        ( 0 <= powercellOnVideo.X ) {
                              // if target to the right, turn towards the right
-            m_drive.CurvatureDrive( -autoDriveSpeed, -(powercellOnVideo.X/300.0), 1 );
+            m_drive.CurvatureDrive( -autoDriveSpeed,
+			            -(powercellOnVideo.X/300.0), 1 );
          } else if ( powercellOnVideo.X < 0 ) {
                                // if target to the left, turn towards the left
-            m_drive.CurvatureDrive( -autoDriveSpeed, -(powercellOnVideo.X/300.0), 1 );
+            m_drive.CurvatureDrive( -autoDriveSpeed,
+			            -(powercellOnVideo.X/300.0), 1 );
          } else {
             m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
          }
 
-      } else {                    // else limelight data is not valid any more
+      } else {               // else USB videocamera data is not valid any more
          // should we continue forward here?
-         m_drive.CurvatureDrive( 0.0, 0, 0 );                // stop the robot
+         m_drive.CurvatureDrive( 0.0, 0, 0 );                 // stop the robot
          returnVal = false;
       }
 
       if ( 0 == iCallCount%100 )  {
-         cout << "lime: " << powercellOnVideo.SeenByCamera << ":" << powercellOnVideo.X << "/" << powercellOnVideo.Y;
+         cout << "Powercell Seen flag " << powercellOnVideo.SeenByCamera <<
+		 ": " << powercellOnVideo.X << "/" << powercellOnVideo.Y;
          cout << ", " << powercellOnVideo.Radius  << "." << endl;
       }
 
