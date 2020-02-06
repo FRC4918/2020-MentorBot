@@ -67,6 +67,7 @@ class Robot : public frc::TimedRobot {
    struct sState {
       double joyX;
       double joyY;
+      double joyZ;
       double conX;
       double conY;
       bool   joyButton[12];
@@ -179,7 +180,7 @@ class Robot : public frc::TimedRobot {
                                                     // of the detected circles
                               100,          // param1 (edge detector threshold)
                               84,  // p2: increase this to reduce false circles
-                              20,                      // minimum circle radius
+                              5,                      // minimum circle radius
                               70 );                    // maximum circle radius
                               // was: threshImg.rows / 4, 100, 50, 10, 800 );
 
@@ -209,7 +210,7 @@ class Robot : public frc::TimedRobot {
                   iBiggestCircleRadius = (int)v3fCircles[i][2];
                }
                         // draw small green circle at center of object detected
-               cv::circle( threshImg,                 // draw on original image
+               cv::circle( output,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            3,                     // radius of circle in pixels
@@ -217,7 +218,7 @@ class Robot : public frc::TimedRobot {
                            CV_FILLED );                            // thickness
 
                                       // draw red circle around object detected 
-               cv::circle( threshImg,                 // draw on original image
+               cv::circle( output,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            (int)v3fCircles[i][2], // radius of circle in pixels
@@ -240,8 +241,8 @@ class Robot : public frc::TimedRobot {
                powercellOnVideo.SeenByCamera = false;
             }
 
-            //outputStreamStd.PutFrame( output );
-            outputStreamStd.PutFrame( threshImg );
+            outputStreamStd.PutFrame( output );
+            //outputStreamStd.PutFrame( threshImg );
             v3fCircles.clear();
          }
       }
@@ -262,6 +263,7 @@ class Robot : public frc::TimedRobot {
 
       sCurrState.joyX = m_stick.GetX();
       sCurrState.joyY = m_stick.GetY();
+      sCurrState.joyZ = m_stick.GetZ();
       sCurrState.conX = m_console.GetX();
       sCurrState.conY = m_console.GetY();
       for ( int iLoopCount=1; iLoopCount<=11; iLoopCount++ ) {
@@ -373,16 +375,16 @@ class Robot : public frc::TimedRobot {
              // We could change the if/else statements below to calculate
              // autoDriveSpeed by using a math expression based on
              // powercellOnVideo.Y values.
-         if        ( powercellOnVideo.Y < -50 ) {  // if we're super close
-            autoDriveSpeed = -0.15;   //   go backward slowly
+         if        ( powercellOnVideo.Y < -40 ) {  // if we're super close
+            autoDriveSpeed = -0.25;   //   go backward slowly
          } else if ( powercellOnVideo.Y < -30 )  { // if we're really close...
             autoDriveSpeed = 0.0;     //   stop (or 0.08 to go slow)
          } else if ( powercellOnVideo.Y < -10 ) {  // if we're a little farther
-            autoDriveSpeed = 0.12;    //   go a little faster
+            autoDriveSpeed = 0.15;    //   go a little faster
          } else if (  powercellOnVideo.Y < 20 ) {  // if we're farther still...
-            autoDriveSpeed = 0.15;    //   go a little faster still
+            autoDriveSpeed = 0.20;    //   go a little faster still
          } else {                     // else we must be really far...
-            autoDriveSpeed = 0.20;    //   go as fast as we dare
+            autoDriveSpeed = 0.25;    //   go as fast as we dare
          }
 
                           // LATER: May want to modify autoDriveSpeed depending
@@ -394,11 +396,11 @@ class Robot : public frc::TimedRobot {
          if        ( 0 <= powercellOnVideo.X ) {
                              // if target to the right, turn towards the right
             m_drive.CurvatureDrive( -autoDriveSpeed,
-                                    -(powercellOnVideo.X/300.0), 1 );
+                                    -sqrt((powercellOnVideo.X/300.0)), 1 );
          } else if ( powercellOnVideo.X < 0 ) {
                                // if target to the left, turn towards the left
             m_drive.CurvatureDrive( -autoDriveSpeed,
-                                    -(powercellOnVideo.X/300.0), 1 );
+                                    sqrt((-powercellOnVideo.X/300.0)), 1 );
          } else {
             m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
          }
@@ -467,7 +469,54 @@ class Robot : public frc::TimedRobot {
       } else if ( sMState.sensorVmax < motorVelocity ) {
          sMState.sensorVmax = motorVelocity;
       }
-   }
+   }      // motorFindMinMaxVelocity()
+
+
+      /*---------------------------------------------------------------------*/
+      /* Team4918Drive()                                                     */
+      /* This function implements something similar to                       */
+      /* frc::DifferentialDrive::ArcadeDrive() or CurvatureDrive, but        */
+      /* customized for Team 4918's Robot.  In particular, it uses           */
+      /* ControlMode::Velocity rather than ControlMode::PercentOutput        */
+      /* to drive the motors.  So this should be much more precise for the   */
+      /* drivers.                                                            */
+      /* It uses desiredForward (-1.0 to +1.0) as the desired forward speed, */
+      /* and desiredTurn (-1.0 to +1.0, positive to the right) for the       */
+      /* desired turn rate.                                                  */
+      /*---------------------------------------------------------------------*/
+   void Team4918Drive( double desiredForward, double desiredTurn ) {
+                  /* To drive the robot using the drive motor encoders,     */
+                  /* specifying each motor separately, we must              */
+                  /* convert the desired speed to units / 100ms,            */
+                  /* because the velocity setpoint is in units/100ms.       */
+                  /* For example, to convert 500 RPM to units / 100ms:      */
+                  /* 4096 Units/Rev * 500 RPM / 600 100ms/min               */
+                  /* So code to drive the robot at up to 500 rpm in either  */
+                  /* direction could look like this:                        */
+      double  leftMotorOutput = 0.0;
+      double rightMotorOutput = 0.0;
+      if ( 0.0 < desiredForward ) {
+         if ( 0.0 < desiredTurn ) {
+            leftMotorOutput  = desiredForward - desiredTurn;
+//          rightMotorOutput = -std::max( desiredForward, desiredTurn );
+         } else {
+            leftMotorOutput  = std::max( desiredForward, -desiredTurn );
+//          rightMotorOutput = -desiredForward + desiredTurn;
+         }
+      } else {
+         if ( 0.0 < desiredTurn ) {
+            leftMotorOutput  = -std::max( desiredForward, desiredTurn );
+//          rightMotorOutput = desiredForward + desiredTurn;
+         } else {
+            leftMotorOutput  = -desiredForward - desiredTurn;
+//          rightMotorOutput = -std::max( -desiredForward, -desiredTurn );
+         }
+      }
+      m_motorLSMaster.Set( ControlMode::Velocity, 
+                           leftMotorOutput  * 500.0 * 4096 / 600 );
+      m_motorRSMaster.Set( ControlMode::Velocity, 
+                           rightMotorOutput * 500.0 * 4096 / 600 );
+   }      // Team4918Drive()
 
 
       /*---------------------------------------------------------------------*/
@@ -567,6 +616,7 @@ class Robot : public frc::TimedRobot {
             m_drive.StopMotor();
             iButtonPressCallCount = 0;
          }
+         m_drive.StopMotor();    // this is needed to eliminate motor warnings
 
          if ( iButtonPressCallCount < 50 ) {       // turn motors on gently...
             m_motorLSMaster.Set( ControlMode::Velocity,
@@ -584,41 +634,13 @@ class Robot : public frc::TimedRobot {
                                    RSMotorState.targetVelocity_UnitsPer100ms);
          }
          iButtonPressCallCount++;
-      } else { 
+      } else {
                                     /* Drive the robot according to the     */
                                     /* commanded Y and X joystick position. */
-         m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
-
-                  /* To drive the robot using the drive motor encoders,     */
-                  /* specifying each motor separately, we must              */
-                  /* convert the desired speed to units / 100ms,            */
-                  /* because the velocity setpoint is in units/100ms.       */
-                  /* For example, to convert 500 RPM to units / 100ms:      */
-                  /* 4096 Units/Rev * 500 RPM / 600 100ms/min               */
-                  /* So code to drive the robot at up to 500 rpm in either  */
-                  /* direction could look like this:                        */
-         // double leftMotorOutput, rightMotorOutput;
-         // if ( 0.0 < sCurrState.joyY ) {
-         //    if ( 0.0 < sCurrState.joyX ) {
-         //       leftMotorOutput  = sCurrState.joyY - sCurrState.joyX;
-         //       rightMotorOutput = std::max( sCurrState.joyY, sCurrState.joyX );
-         //    } else {
-         //       leftMotorOutput  = std::max( sCurrState.joyY, -sCurrState.joyX );
-         //       rightMotorOutput = sCurrState.joyY + sCurrState.joyX;
-         //    }
-         //  } else {
-         //    if ( 0.0 < sCurrState.joyX ) {
-         //       leftMotorOutput  = -std::max( -sCurrState.joyY, sCurrState.joyX );
-         //       rightMotorOutput = sCurrState.joyY + sCurrState.joyX;
-         //    } else {
-         //       leftMotorOutput  = sCurrState.joyY - sCurrState.joyX;
-         //       rightMotorOutput = -std::max( -sCurrState.joyY, -sCurrState.joyX );
-         //    }
-         //  }
-         // m_motorLSMaster.Set( ControlMode::Velocity, 
-         //                      leftMotorOutput  * 500.0 * 4096 / 600 );
-         // m_motorRSMaster.Set( ControlMode::Velocity, 
-         //                      rightMotorOutput * 500.0 * 4096 / 600 );
+          m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
+	      // our joystick increases Y when pulled BACKWARDS, and increases
+	      // X when pushed to the right.
+        // Team4918Drive( -sCurrState.joyY, sCurrState.joyX );
       }
       return true;
    }      // RunDriveMotors()
@@ -708,7 +730,38 @@ class Robot : public frc::TimedRobot {
       return true;
    }     // RunShooter()
 
+ /*---------------------------------------------------------------------*/
+      /* RunClimber()                                                         */
+      /* Setup the initial configuration of a motor.  These settings can be  */
+      /* superseded after this function is called, for the needs of each     */
+      /* specific motor.                                                     */
+      /*---------------------------------------------------------------------*/
+   void RunClimber( void ) {
+      static int iCallCount = 0;
+      iCallCount++;
 
+
+      if (sCurrState.conButton[1] && sCurrState.conButton[3] ) {
+	      
+	         m_motorTopShooter.Set( ControlMode::PercentOutput,
+				 1.0*sCurrState.joyZ);
+      
+      } else if ( sCurrState.conButton[1] ){
+	    m_motorTopShooter.Set( ControlMode::PercentOutput, 0.2 );
+
+      } else if (sCurrState.conButton[3] ) {
+            m_motorTopShooter.Set( ControlMode::PercentOutput, -0.2);
+           
+      } else { 
+	    m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0);
+      }
+      
+      if ( 0 == iCallCount%50 ) {
+          cout << "ClimberUp; " << setw(5) << m_motorTopShooter.GetStatorCurrent() << "A" << endl;
+         
+      }
+   }
+   
       /*---------------------------------------------------------------------*/
       /* motorInit()                                                         */
       /* Setup the initial configuration of a motor.  These settings can be  */
@@ -755,13 +808,13 @@ class Robot : public frc::TimedRobot {
       m_motor.ConfigPeakOutputReverse(   -1, 10 );
 
             /* Set limits to how much current will be sent through the motor */
-      m_motor.ConfigPeakCurrentLimit(10);    // 60 works here for miniCIMs
+      m_motor.ConfigPeakCurrentLimit(40);    // 60 works here for miniCIMs
       m_motor.ConfigPeakCurrentDuration(1);  // 1000 milliseconds (for 60 Amps)
                                              // works fine here, with 40 for
                                              // ConfigContinuousCurrentLimit(),
                                              // but we can reduce to 10, 1, 10
                                              // for safety while debugging
-      m_motor.ConfigContinuousCurrentLimit(10);
+      m_motor.ConfigContinuousCurrentLimit(40);
       m_motor.EnableCurrentLimit(true);
 
                  /* Set Closed Loop PIDF gains in slot0 - see documentation */
@@ -996,7 +1049,9 @@ class Robot : public frc::TimedRobot {
 
       RunDriveMotors();
 
-      RunShooter();
+      // RunShooter();
+      //
+      RunClimber();
 
 
       sPrevState = sCurrState;
