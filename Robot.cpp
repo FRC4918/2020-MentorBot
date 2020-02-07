@@ -375,9 +375,9 @@ class Robot : public frc::TimedRobot {
              // We could change the if/else statements below to calculate
              // autoDriveSpeed by using a math expression based on
              // powercellOnVideo.Y values.
-         if        ( powercellOnVideo.Y < -40 ) {  // if we're super close
-            autoDriveSpeed = -0.25;   //   go backward slowly
-         } else if ( powercellOnVideo.Y < -30 )  { // if we're really close...
+         if        ( powercellOnVideo.Y < -30 ) {  // if we're super close
+            autoDriveSpeed = -0.30;   //   go backward slowly
+         } else if ( powercellOnVideo.Y < -20 )  { // if we're really close...
             autoDriveSpeed = 0.0;     //   stop (or 0.08 to go slow)
          } else if ( powercellOnVideo.Y < -10 ) {  // if we're a little farther
             autoDriveSpeed = 0.15;    //   go a little faster
@@ -395,14 +395,18 @@ class Robot : public frc::TimedRobot {
          // for the offset of the camera away from the centerline of the robot.
          if        ( 0 <= powercellOnVideo.X ) {
                              // if target to the right, turn towards the right
-            m_drive.CurvatureDrive( -autoDriveSpeed,
-                                    -sqrt((powercellOnVideo.X/300.0)), 1 );
+            //m_drive.CurvatureDrive( -autoDriveSpeed,
+            //                        -sqrt((powercellOnVideo.X/300.0)), 1 );
+            Team4918Drive( autoDriveSpeed, sqrt(powercellOnVideo.X/300.0) );
          } else if ( powercellOnVideo.X < 0 ) {
                                // if target to the left, turn towards the left
-            m_drive.CurvatureDrive( -autoDriveSpeed,
-                                    sqrt((-powercellOnVideo.X/300.0)), 1 );
+            //m_drive.CurvatureDrive( -autoDriveSpeed,
+            //                        sqrt((-powercellOnVideo.X/300.0)), 1 );
+            Team4918Drive( autoDriveSpeed, -sqrt(-powercellOnVideo.X/300.0) );           
          } else {
-            m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+            //m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+
+            Team4918Drive( autoDriveSpeed, 0.0 );     // drive straight forward
          }
 
       } else {               // else USB videocamera data is not valid any more
@@ -495,23 +499,36 @@ class Robot : public frc::TimedRobot {
                   /* direction could look like this:                        */
       double  leftMotorOutput = 0.0;
       double rightMotorOutput = 0.0;
+      m_drive.StopMotor();
+#ifndef JAG_NOTDEFINED
+      leftMotorOutput  = -desiredForward - desiredTurn;
+      rightMotorOutput = +desiredForward - desiredTurn;
+      leftMotorOutput  = std::min(  1.0, leftMotorOutput );
+      rightMotorOutput = std::min(  1.0, rightMotorOutput );
+      leftMotorOutput  = std::max( -1.0, leftMotorOutput );
+      rightMotorOutput = std::max( -1.0, rightMotorOutput );
+#else
       if ( 0.0 < desiredForward ) {
          if ( 0.0 < desiredTurn ) {
-            leftMotorOutput  = desiredForward - desiredTurn;
+            leftMotorOutput  = -desiredForward - desiredTurn;
 //          rightMotorOutput = -std::max( desiredForward, desiredTurn );
+            rightMotorOutput = -desiredForward + desiredTurn;
          } else {
             leftMotorOutput  = std::max( desiredForward, -desiredTurn );
+leftMotorOutput = 0.0;
 //          rightMotorOutput = -desiredForward + desiredTurn;
          }
       } else {
          if ( 0.0 < desiredTurn ) {
-            leftMotorOutput  = -std::max( desiredForward, desiredTurn );
+//          leftMotorOutput  = -std::max( desiredForward, desiredTurn );
+leftMotorOutput = 0.0;
 //          rightMotorOutput = desiredForward + desiredTurn;
          } else {
             leftMotorOutput  = -desiredForward - desiredTurn;
 //          rightMotorOutput = -std::max( -desiredForward, -desiredTurn );
          }
       }
+#endif
       m_motorLSMaster.Set( ControlMode::Velocity, 
                            leftMotorOutput  * 500.0 * 4096 / 600 );
       m_motorRSMaster.Set( ControlMode::Velocity, 
@@ -637,10 +654,10 @@ class Robot : public frc::TimedRobot {
       } else {
                                     /* Drive the robot according to the     */
                                     /* commanded Y and X joystick position. */
-          m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
-	      // our joystick increases Y when pulled BACKWARDS, and increases
-	      // X when pushed to the right.
-        // Team4918Drive( -sCurrState.joyY, sCurrState.joyX );
+         // m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
+              // our joystick increases Y when pulled BACKWARDS, and increases
+              // X when pushed to the right.
+         Team4918Drive( -sCurrState.joyY, sCurrState.joyX );
       }
       return true;
    }      // RunDriveMotors()
@@ -742,22 +759,23 @@ class Robot : public frc::TimedRobot {
 
 
       if (sCurrState.conButton[1] && sCurrState.conButton[3] ) {
-	      
-	         m_motorTopShooter.Set( ControlMode::PercentOutput,
-				 1.0*sCurrState.joyZ);
+
+         m_motorTopShooter.Set( ControlMode::PercentOutput,
+                                 1.0*sCurrState.joyZ);
       
       } else if ( sCurrState.conButton[1] ){
-	    m_motorTopShooter.Set( ControlMode::PercentOutput, 0.2 );
+         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.2 );
 
       } else if (sCurrState.conButton[3] ) {
-            m_motorTopShooter.Set( ControlMode::PercentOutput, -0.2);
+         m_motorTopShooter.Set( ControlMode::PercentOutput, -0.2);
            
       } else { 
-	    m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0);
+         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0);
       }
       
       if ( 0 == iCallCount%50 ) {
-          cout << "ClimberUp; " << setw(5) << m_motorTopShooter.GetStatorCurrent() << "A" << endl;
+          // cout << "ClimberUp; " << setw(5) <<
+          //      m_motorTopShooter.GetStatorCurrent() << "A" << endl;
          
       }
    }
