@@ -52,6 +52,8 @@ class Robot : public frc::TimedRobot {
    WPI_TalonSRX m_motorTopShooter{ 2 };   // top motor on shooter
    WPI_TalonSRX m_motorBotShooter{ 9 };   // bottom motor on shooter
 
+   PigeonIMU    pigeonIMU{ 1 };
+
    int iAutoCount;
    float drivePowerFactor = 0.8;
    frc::Joystick m_stick{0};
@@ -72,6 +74,8 @@ class Robot : public frc::TimedRobot {
       double conY;
       bool   joyButton[12];
       bool   conButton[13];
+      double yawPitchRoll[3];  // data from Pigeon IMU
+      double initialYaw; 
    } sCurrState, sPrevState;
 
    struct sMotorState {
@@ -101,7 +105,6 @@ class Robot : public frc::TimedRobot {
                  /*                      v: whether the data is valid,      */
                  /*                      s: skew or rotation, deg (-90-0).  */
    double limex, limey, limea, limev, limes;
-
 
       /*---------------------------------------------------------------------*/
       /* VisionThread()                                                      */
@@ -190,7 +193,7 @@ class Robot : public frc::TimedRobot {
                                                              // for each circle
             for ( unsigned int i = 0; i < v3fCircles.size(); i++ ) {
 
-               if ( 0 == iFrameCount%300 ) {          // every 10 seconds or so
+               if ( 0 == iFrameCount%3000 ) {          // every 10 seconds or so
                                       // Log the x and y position of the center
                                       // point of circle, and the radius.
                   std::cout << "Ball position X = " << v3fCircles[i][0] <<
@@ -271,6 +274,8 @@ class Robot : public frc::TimedRobot {
          sCurrState.conButton[iLoopCount] = m_console.GetRawButton(iLoopCount);
       }
       sCurrState.conButton[12] = m_console.GetRawButton(12);
+
+      pigeonIMU.GetYawPitchRoll( sCurrState.yawPitchRoll );
 
       limev = limenttable->GetNumber("tv",0.0);  // valid
       limex = limenttable->GetNumber("tx",0.0);  // x position
@@ -375,16 +380,21 @@ class Robot : public frc::TimedRobot {
              // We could change the if/else statements below to calculate
              // autoDriveSpeed by using a math expression based on
              // powercellOnVideo.Y values.
-         if        ( powercellOnVideo.Y < -30 ) {  // if we're super close
-            autoDriveSpeed = -0.30;   //   go backward slowly
-         } else if ( powercellOnVideo.Y < -20 )  { // if we're really close...
+         if        ( powercellOnVideo.Y < -50 ) {  // if we're super close
+            autoDriveSpeed = -0.35;   //   go backward slowly
+         } else if ( powercellOnVideo.Y < -30 ) {  // if we're super close
+            autoDriveSpeed = -0.25;   //   go backward slowly
+            autoDriveSpeed = -0.35 * float( - 30 - powercellOnVideo.Y ) / 20.0;
+         } else if ( powercellOnVideo.Y < 0 )   { // if we're really close...
             autoDriveSpeed = 0.0;     //   stop (or 0.08 to go slow)
-         } else if ( powercellOnVideo.Y < -10 ) {  // if we're a little farther
+         } else if ( powercellOnVideo.Y <  20 ) {  // if we're a little farther
             autoDriveSpeed = 0.15;    //   go a little faster
-         } else if (  powercellOnVideo.Y < 20 ) {  // if we're farther still...
+            autoDriveSpeed = 0.20 * float( powercellOnVideo.Y ) / 20.0;
+         } else if (  powercellOnVideo.Y < 40 ) {  // if we're farther still...
             autoDriveSpeed = 0.20;    //   go a little faster still
+            autoDriveSpeed = 0.20 + 0.20 * float( powercellOnVideo.Y - 20 ) / 40.0;
          } else {                     // else we must be really far...
-            autoDriveSpeed = 0.25;    //   go as fast as we dare
+            autoDriveSpeed = 0.30;    //   go as fast as we dare
          }
 
                           // LATER: May want to modify autoDriveSpeed depending
@@ -435,6 +445,14 @@ class Robot : public frc::TimedRobot {
    void joystickDisplay( void ) {
          cout << "joy (y/x): " << setw(8) << sCurrState.joyY << "/" <<
                  setw(8) << sCurrState.joyX << endl;
+   }
+
+   void displayIMUOrientation( void ) {
+         cout << "PigeonIMU (yaw/pitch/roll): " <<
+               sCurrState.yawPitchRoll[0] << "/" <<
+               sCurrState.yawPitchRoll[1] << "/" <<
+               sCurrState.yawPitchRoll[2] << endl;
+         cout << "piegontemp: " << pigeonIMU.GetTemp() << endl; 
    }
 
 
@@ -501,6 +519,12 @@ class Robot : public frc::TimedRobot {
       double rightMotorOutput = 0.0;
       m_drive.StopMotor();
 #ifndef JAG_NOTDEFINED
+	   if ( ( -0.10 < desiredForward ) && ( desiredForward < 0.10 ) ) {
+         desiredForward = 0.0;
+      }
+      if ( ( -0.10 < desiredTurn ) && ( desiredTurn < 0.10 ) ) {
+         desiredTurn = 0.0;
+      }
       leftMotorOutput  = -desiredForward - desiredTurn;
       rightMotorOutput = +desiredForward - desiredTurn;
       leftMotorOutput  = std::min(  1.0, leftMotorOutput );
@@ -546,11 +570,11 @@ leftMotorOutput = 0.0;
       static int iCallCount = 0;
       iCallCount++;
 
-                  /* If joystick button 2 pressed, use the joystick position */
+                  /* If joystick button 5 pressed, use the joystick position */
                   /* to adjust some variables to specific speeds, so we can  */
                   /* set the drive motors to those speeds in later code.     */
       if ( ( 0 == iCallCount%100 )  &&
-           sCurrState.joyButton[2]     ) {
+           sCurrState.joyButton[5]     ) {
 
          if ( 0.5 < m_stick.GetY() &&
               LSMotorState.targetVelocity_UnitsPer100ms < 790.0 * 4096 / 600 ) {
@@ -574,17 +598,17 @@ leftMotorOutput = 0.0;
       motorFindMinMaxVelocity( m_motorLSMaster, LSMotorState );
       motorFindMinMaxVelocity( m_motorRSMaster, RSMotorState );
 
-
       if ( 0 == iCallCount%100 )  {   // every 2 seconds
-         joystickDisplay();
+         //joystickDisplay();
 
-         motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
-         motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+         //motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
+         //motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+         displayIMUOrientation();
 
          // max free speed for MinCims is about 6200
-         cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
-         cout << RoborioAccel.GetY() << "/";
-         cout << RoborioAccel.GetZ() << endl;
+         //cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
+         //cout << RoborioAccel.GetY() << "/";
+         //cout << RoborioAccel.GetZ() << endl;
       }
 
                                        /* Button 1 is the trigger button on */
@@ -596,9 +620,12 @@ leftMotorOutput = 0.0;
 
                                  /* Button 6 is the button on the           */
                                  /* front-left of the base of the joystick. */
-      } else if ( ( sCurrState.joyButton[6] ) &&      // If driver is pressing
-                  ( sCurrState.joyButton[1] ) &&      // buttons 6 AND 1, and
-                  ( powercellOnVideo.SeenByCamera ) ) {      // the USB camera
+
+
+
+      } else if ( ( !sCurrState.joyButton[2] ) &&      // If driver is pressing
+                  ( sCurrState.joyButton[1] ) &&      // button 1, and not 2, 
+                  ( powercellOnVideo.SeenByCamera ) ) { // and the USB camera
                                                       // has seen a powercell,
          DriveToPowercell();  // then autonomously drive towards the powercell
 
@@ -625,11 +652,11 @@ leftMotorOutput = 0.0;
          m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
          m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
 
-                                     /* Button 2 is the bottom-most center  */
-                                     /* button on the back of the joystick. */
-      } else if ( sCurrState.joyButton[2] ) {
+                                     /* Button 5 is the Right-most button  */
+                                     /* top, side on the back of the joystick. */
+      } else if ( sCurrState.joyButton[5] ) {
          static int iButtonPressCallCount = 0;
-         if ( !sPrevState.joyButton[2] ) {  // if button has just been pressed
+         if ( !sPrevState.joyButton[5] ) {  // if button has just been pressed
             m_drive.StopMotor();
             iButtonPressCallCount = 0;
          }
@@ -657,7 +684,12 @@ leftMotorOutput = 0.0;
          // m_drive.ArcadeDrive( m_stick.GetY(), -m_stick.GetX() );
               // our joystick increases Y when pulled BACKWARDS, and increases
               // X when pushed to the right.
-         Team4918Drive( -sCurrState.joyY, sCurrState.joyX );
+         if ( sCurrState.joyButton[2] ) {
+            Team4918Drive( sCurrState.joyY, sCurrState.joyX );
+         } else {
+            Team4918Drive( -sCurrState.joyY, sCurrState.joyX );
+         }
+
       }
       return true;
    }      // RunDriveMotors()
@@ -835,6 +867,10 @@ leftMotorOutput = 0.0;
       m_motor.ConfigContinuousCurrentLimit(40);
       m_motor.EnableCurrentLimit(true);
 
+                                          // Config 100% motor output to 12.0V
+      m_motor.ConfigVoltageCompSaturation( 12.0 );
+      m_motor.EnableVoltageCompensation( true );
+
                  /* Set Closed Loop PIDF gains in slot0 - see documentation */
                                                     // if encoder is connected
       if ( OK == m_motor.ConfigSelectedFeedbackSensor(
@@ -987,6 +1023,9 @@ leftMotorOutput = 0.0;
       cout << "shoot 3 balls" << endl;
       m_drive.StopMotor();
       iCallCount=0;
+      GetAllVariables();
+      sCurrState.initialYaw=sCurrState.yawPitchRoll[0]; 
+
    }
 
 
@@ -1008,17 +1047,35 @@ leftMotorOutput = 0.0;
       LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
       RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
 
-      if (iCallCount<90) {
-         if ( sCurrState.conButton[10] ) {
-            LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
-         } else if ( sCurrState.conButton[11] ) {
-            LSMotorState.targetVelocity_UnitsPer100ms = -100.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms = -100.0 * 4096 / 600;
+      if (iCallCount<200) {
+         if ( sCurrState.conButton[10]){
+            if (sCurrState.yawPitchRoll[0]<sCurrState.initialYaw+40.0) {
+               LSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+            } else if (sCurrState.yawPitchRoll[0]<sCurrState.initialYaw+80.0) {
+               LSMotorState.targetVelocity_UnitsPer100ms = 200.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms = 200.0 * 4096 / 600;
+            } else {
+               LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;  
+               iCallCount=200; 
+            }
+         } else if ( sCurrState.conButton[11]) {
+            if (sCurrState.yawPitchRoll[0]>sCurrState.initialYaw-40.0) {
+               LSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
+            }else if (sCurrState.yawPitchRoll[0]>sCurrState.initialYaw-80.0) {
+               LSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
+            } else {
+               LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
+               iCallCount=200;
+            }
          } else { 
-            iCallCount=90;
+            iCallCount=200;
          }
-      } else if ( iCallCount<180 ) {
+      } else if ( iCallCount<250 ) {
          LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
          RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
       } else {
@@ -1039,6 +1096,7 @@ leftMotorOutput = 0.0;
       if ( 0 == iCallCount%100 ) {
          motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
          motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+         displayIMUOrientation();
       }
    }
 
