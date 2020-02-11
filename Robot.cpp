@@ -96,6 +96,7 @@ class Robot : public frc::TimedRobot {
       int  X;
       int  Y;
       int  Radius;
+      bool SwitchToColorWheelCam;
    } powercellOnVideo;
 
  private:
@@ -118,22 +119,26 @@ class Robot : public frc::TimedRobot {
       /*---------------------------------------------------------------------*/
    static void VisionThread() {
       static double dTimeOfLastCall;
+      static bool   prevSwitchToColorWheelCam = false;
 
       int iBiggestCircleIndex = -1;
       int iBiggestCircleRadius = -1;
 
 
-      
       cs::UsbCamera camera =
-                 frc::CameraServer::GetInstance()->StartAutomaticCapture();
+                 frc::CameraServer::GetInstance()->StartAutomaticCapture(1);
          //camera.SetResolution( 640, 480 );   // too detailed and slow
          //camera.SetResolution( 160, 120 );   // too coarse
       camera.SetResolution( 320, 240 );        // just right
+      cs::UsbCamera camera2 =
+                  frc::CameraServer::GetInstance()->StartAutomaticCapture(0);
+      camera2.SetResolution( 320, 240 );
 
       powercellOnVideo.SeenByCamera = false;  // Make sure no other code thinks
       powercellOnVideo.X = 0;                 // we see a powercell until we
       powercellOnVideo.Y = 0;                 // actually see one!
       powercellOnVideo.Radius = -1;
+      powercellOnVideo.SwitchToColorWheelCam = false;
 
       cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo();
       cs::CvSource outputStreamStd =
@@ -159,8 +164,19 @@ class Robot : public frc::TimedRobot {
       int     lowV = 0;         // Set Value (orig: 102)
       int     highV = 255;      // (orig: 225)
 
+      cvSink.SetSource( camera );
       while( true ) {
          static int iFrameCount = 0;
+
+         if ( powercellOnVideo.SwitchToColorWheelCam &&
+              !prevSwitchToColorWheelCam ) {
+            cvSink.SetSource( camera2 );       // switch to color wheel camera
+            prevSwitchToColorWheelCam = powercellOnVideo.SwitchToColorWheelCam;
+         } else if ( !powercellOnVideo.SwitchToColorWheelCam &&
+                     prevSwitchToColorWheelCam ) {
+            cvSink.SetSource( camera );     // switch back to powercell camera
+            prevSwitchToColorWheelCam = powercellOnVideo.SwitchToColorWheelCam;
+         }
 
          usleep( 1000 );                               // wait one millisecond
          if ( cvSink.GrabFrame(source) )
@@ -1126,9 +1142,23 @@ leftMotorOutput = 0.0;
       RunDriveMotors();
 
       // RunShooter();
-      //
+
       RunClimber();
 
+              // Switch cameras if console button 5 pressed.
+      if ( !sPrevState.conButton[5] &&
+            sCurrState.conButton[5]    ) {
+
+         powercellOnVideo.SwitchToColorWheelCam =
+                   !powercellOnVideo.SwitchToColorWheelCam;
+
+         cout << "Switching camera to ";
+         if ( powercellOnVideo.SwitchToColorWheelCam ) {
+            cout << "ColorWheelCam" << endl;
+         } else {
+            cout << "PowercellCam" << endl;
+         }
+      }
 
       sPrevState = sCurrState;
 
@@ -1144,7 +1174,7 @@ leftMotorOutput = 0.0;
 };
 
 
-Robot::sPowercellOnVideo Robot::powercellOnVideo = { true, 0, 0, -1 };
+Robot::sPowercellOnVideo Robot::powercellOnVideo = { true, 0, 0, -1, false };
 
 #ifndef RUNNING_FRC_TESTS
 int main() { return frc::StartRobot<Robot>(); }
