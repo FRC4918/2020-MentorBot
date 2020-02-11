@@ -54,6 +54,9 @@ class Robot : public frc::TimedRobot {
 
    PigeonIMU    pigeonIMU{ 1 };
 
+   frc::DigitalInput conveyorDIO0{0};
+   frc::DigitalInput conveyorDIO1{1};
+   
    int iAutoCount;
    float drivePowerFactor = 0.8;
    frc::Joystick m_stick{0};
@@ -199,8 +202,8 @@ class Robot : public frc::TimedRobot {
                                                     // of the detected circles
                               100,          // param1 (edge detector threshold)
                               84,  // p2: increase this to reduce false circles
-                              5,                      // minimum circle radius
-                              70 );                    // maximum circle radius
+                              15,                      // minimum circle radius
+                              34 );                    // maximum circle radius
                               // was: threshImg.rows / 4, 100, 50, 10, 800 );
 
             iBiggestCircleIndex = -1;     // init to an impossible index
@@ -209,7 +212,7 @@ class Robot : public frc::TimedRobot {
                                                              // for each circle
             for ( unsigned int i = 0; i < v3fCircles.size(); i++ ) {
 
-               if ( 0 == iFrameCount%3000 ) {          // every 10 seconds or so
+               if ( 0 == iFrameCount%60 ) {          // every 10 seconds or so
                                       // Log the x and y position of the center
                                       // point of circle, and the radius.
                   std::cout << "Ball position X = " << v3fCircles[i][0] <<
@@ -229,7 +232,7 @@ class Robot : public frc::TimedRobot {
                   iBiggestCircleRadius = (int)v3fCircles[i][2];
                }
                         // draw small green circle at center of object detected
-               cv::circle( output,                 // draw on original image
+               cv::circle( threshImg,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            3,                     // radius of circle in pixels
@@ -237,7 +240,7 @@ class Robot : public frc::TimedRobot {
                            CV_FILLED );                            // thickness
 
                                       // draw red circle around object detected 
-               cv::circle( output,                 // draw on original image
+               cv::circle( threshImg,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            (int)v3fCircles[i][2], // radius of circle in pixels
@@ -260,8 +263,8 @@ class Robot : public frc::TimedRobot {
                powercellOnVideo.SeenByCamera = false;
             }
 
-            outputStreamStd.PutFrame( output );
-            //outputStreamStd.PutFrame( threshImg );
+            //outputStreamStd.PutFrame( output );
+            outputStreamStd.PutFrame( threshImg );
             v3fCircles.clear();
          }
       }
@@ -619,7 +622,7 @@ leftMotorOutput = 0.0;
 
          //motorDisplay( "LS:", m_motorLSMaster, LSMotorState );
          //motorDisplay( "RS:", m_motorRSMaster, RSMotorState );
-         displayIMUOrientation();
+         //displayIMUOrientation();
 
          // max free speed for MinCims is about 6200
          //cout << "Accel: x/y/z: " << RoborioAccel.GetX() << "/";
@@ -915,6 +918,57 @@ leftMotorOutput = 0.0;
 
 
       /*---------------------------------------------------------------------*/
+      /* RunConveyor()                                                       */
+      /* This function is called once when the robot is powered up.          */
+      /* It performs preliminary initialization of all hardware that will    */
+      /* be used in Autonomous or Teleop modes.                              */
+      /*---------------------------------------------------------------------*/
+   void RunConveyor( void ) {
+      static bool prevconveyorDIO0 = false;
+      static bool prevconveyorDIO1 = false; 
+      if (prevconveyorDIO0 != conveyorDIO0.Get()) {
+         if (!conveyorDIO0.Get() ) {   // if this sensor is blocked
+            cout << "ball in position 0" << endl;
+         } else {
+            cout << "ball not in position 0" << endl; 
+         } 
+         prevconveyorDIO0 = conveyorDIO0.Get();
+      }
+
+      if (prevconveyorDIO1 != conveyorDIO1.Get()) {
+         if (!conveyorDIO1.Get() ) {   // if this sensor is blocked
+            cout << "ball in position 1" << endl;
+         } else {
+            cout << "ball not in position 1" << endl; 
+         } 
+         prevconveyorDIO1 = conveyorDIO1.Get();
+      }
+   }
+
+      /*---------------------------------------------------------------------*/
+      /* SwitchCameraIfNecessary()                                           */
+      /* This function is called once when the robot is powered up.          */
+      /* It performs preliminary initialization of all hardware that will    */
+      /* be used in Autonomous or Teleop modes.                              */
+      /*---------------------------------------------------------------------*/
+   void SwitchCameraIfNecessary( void ) {
+              // Switch cameras if console button 5 pressed.
+      if ( !sPrevState.conButton[5] &&
+            sCurrState.conButton[5]    ) {
+
+         powercellOnVideo.SwitchToColorWheelCam =
+                   !powercellOnVideo.SwitchToColorWheelCam;
+
+         cout << "Switching camera to ";
+         if ( powercellOnVideo.SwitchToColorWheelCam ) {
+            cout << "ColorWheelCam" << endl;
+         } else {
+            cout << "PowercellCam" << endl;
+         }
+      }
+
+}
+      /*---------------------------------------------------------------------*/
       /* RobotInit()                                                         */
       /* This function is called once when the robot is powered up.          */
       /* It performs preliminary initialization of all hardware that will    */
@@ -1144,21 +1198,9 @@ leftMotorOutput = 0.0;
       // RunShooter();
 
       RunClimber();
+      RunConveyor();
+      SwitchCameraIfNecessary();
 
-              // Switch cameras if console button 5 pressed.
-      if ( !sPrevState.conButton[5] &&
-            sCurrState.conButton[5]    ) {
-
-         powercellOnVideo.SwitchToColorWheelCam =
-                   !powercellOnVideo.SwitchToColorWheelCam;
-
-         cout << "Switching camera to ";
-         if ( powercellOnVideo.SwitchToColorWheelCam ) {
-            cout << "ColorWheelCam" << endl;
-         } else {
-            cout << "PowercellCam" << endl;
-         }
-      }
 
       sPrevState = sCurrState;
 
