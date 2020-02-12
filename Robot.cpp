@@ -78,7 +78,9 @@ class Robot : public frc::TimedRobot {
       bool   joyButton[12];
       bool   conButton[13];
       double yawPitchRoll[3];  // data from Pigeon IMU
-      double initialYaw; 
+      double initialYaw;
+      bool   powercellInIntake;
+      bool   powercellInPosition5;
    } sCurrState, sPrevState;
 
    struct sMotorState {
@@ -159,9 +161,9 @@ class Robot : public frc::TimedRobot {
          /* Adjust Saturation and Value depending on the lighting condition  */
          /* of the environment as well as the surface of the object.         */
       int     lowH = 21;       // Set Hue
-      int     highH = 56;      // (orig: 30)
+      int     highH = 46;      // (orig: 30)
 
-      int     lowS = 30;        // Set Saturation (orig: 200)
+      int     lowS = 0;        // Set Saturation (orig: 200)
       int     highS = 255;
 
       int     lowV = 0;         // Set Value (orig: 102)
@@ -202,8 +204,8 @@ class Robot : public frc::TimedRobot {
                                                     // of the detected circles
                               100,          // param1 (edge detector threshold)
                               84,  // p2: increase this to reduce false circles
-                              15,                      // minimum circle radius
-                              34 );                    // maximum circle radius
+                              24,                      // minimum circle radius
+                              64 );                    // maximum circle radius
                               // was: threshImg.rows / 4, 100, 50, 10, 800 );
 
             iBiggestCircleIndex = -1;     // init to an impossible index
@@ -232,7 +234,7 @@ class Robot : public frc::TimedRobot {
                   iBiggestCircleRadius = (int)v3fCircles[i][2];
                }
                         // draw small green circle at center of object detected
-               cv::circle( threshImg,                 // draw on original image
+               cv::circle( output,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            3,                     // radius of circle in pixels
@@ -240,7 +242,7 @@ class Robot : public frc::TimedRobot {
                            CV_FILLED );                            // thickness
 
                                       // draw red circle around object detected 
-               cv::circle( threshImg,                 // draw on original image
+               cv::circle( output,                 // draw on original image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            (int)v3fCircles[i][2], // radius of circle in pixels
@@ -263,8 +265,8 @@ class Robot : public frc::TimedRobot {
                powercellOnVideo.SeenByCamera = false;
             }
 
-            //outputStreamStd.PutFrame( output );
-            outputStreamStd.PutFrame( threshImg );
+            outputStreamStd.PutFrame( output );
+            //outputStreamStd.PutFrame( threshImg );
             v3fCircles.clear();
          }
       }
@@ -295,6 +297,13 @@ class Robot : public frc::TimedRobot {
       sCurrState.conButton[12] = m_console.GetRawButton(12);
 
       pigeonIMU.GetYawPitchRoll( sCurrState.yawPitchRoll );
+
+                  // Record the positions of powercells in the conveyor system.
+                  // The Digital I/O (DIO) connections are made to IR sensors,
+                  // which return false if the IR beam is blocked (which means
+                  // there is a powercell there) -- so we invert them here. 
+      sCurrState.powercellInIntake    = !conveyorDIO0.Get();
+      sCurrState.powercellInPosition5 = !conveyorDIO1.Get();
 
       limev = limenttable->GetNumber("tv",0.0);  // valid
       limex = limenttable->GetNumber("tx",0.0);  // x position
@@ -465,7 +474,10 @@ class Robot : public frc::TimedRobot {
          cout << "joy (y/x): " << setw(8) << sCurrState.joyY << "/" <<
                  setw(8) << sCurrState.joyX << endl;
    }
-
+      /*---------------------------------------------------------------------*/
+      /* displayIMUOrientation()                                             */
+      /* Display all the yaw pitch & roll values on the console log.         */
+      /*---------------------------------------------------------------------*/
    void displayIMUOrientation( void ) {
          cout << "PigeonIMU (yaw/pitch/roll): " <<
                sCurrState.yawPitchRoll[0] << "/" <<
@@ -798,13 +810,12 @@ leftMotorOutput = 0.0;
       return true;
    }     // RunShooter()
 
- /*---------------------------------------------------------------------*/
-      /* RunClimber()                                                         */
-      /* Setup the initial configuration of a motor.  These settings can be  */
-      /* superseded after this function is called, for the needs of each     */
-      /* specific motor.                                                     */
+
       /*---------------------------------------------------------------------*/
-   void RunClimber( void ) {
+      /* RunClimberPole()                                                    */
+      /* Extend or retract the telescoping climber pole.                     */
+      /*---------------------------------------------------------------------*/
+   void RunClimberPole( void ) {
       static int iCallCount = 0;
       iCallCount++;
 
@@ -830,7 +841,28 @@ leftMotorOutput = 0.0;
          
       }
    }
-   
+
+      /*---------------------------------------------------------------------*/
+      /* RunClimberWinch()                                                   */
+      /* Run the winch motor, to make the robot climb.                       */
+      /*---------------------------------------------------------------------*/
+   void RunClimberWinch( void ) {
+      static int iCallCount = 0;
+      iCallCount++;
+
+      // if ( sCurrState.conButton[1] ){
+      //    m_motorClimberWinch.Set( ControlMode::PercentOutput, 0.2 );
+      // } else { 
+      //    m_motorClimberWinch.Set( ControlMode::PercentOutput, 0.0 );
+      // }
+      
+      if ( 0 == iCallCount%50 ) {
+         // cout << "ClimberWinch Current: " << setw(5) <<
+         //      m_motorClimbWinch.GetStatorCurrent() << "A" << endl;
+      }
+   }
+
+
       /*---------------------------------------------------------------------*/
       /* motorInit()                                                         */
       /* Setup the initial configuration of a motor.  These settings can be  */
@@ -919,29 +951,33 @@ leftMotorOutput = 0.0;
 
       /*---------------------------------------------------------------------*/
       /* RunConveyor()                                                       */
-      /* This function is called once when the robot is powered up.          */
-      /* It performs preliminary initialization of all hardware that will    */
-      /* be used in Autonomous or Teleop modes.                              */
+      /* Run the conveyor belt motors, to move balls into and through the    */
+      /* conveyor system.                                                    */
       /*---------------------------------------------------------------------*/
    void RunConveyor( void ) {
-      static bool prevconveyorDIO0 = false;
-      static bool prevconveyorDIO1 = false; 
-      if (prevconveyorDIO0 != conveyorDIO0.Get()) {
-         if (!conveyorDIO0.Get() ) {   // if this sensor is blocked
-            cout << "ball in position 0" << endl;
+
+      if ( sPrevState.powercellInIntake != sCurrState.powercellInIntake ) {
+         if ( sCurrState.powercellInIntake ) {
+            cout << "powercell in the intake." << endl;
          } else {
-            cout << "ball not in position 0" << endl; 
+            cout << "powercell NOT in the intake." << endl; 
          } 
-         prevconveyorDIO0 = conveyorDIO0.Get();
       }
 
-      if (prevconveyorDIO1 != conveyorDIO1.Get()) {
-         if (!conveyorDIO1.Get() ) {   // if this sensor is blocked
-            cout << "ball in position 1" << endl;
+      if ( sPrevState.powercellInPosition5 !=
+                                          sCurrState.powercellInPosition5 ) {
+         if ( sCurrState.powercellInPosition5 ) {              // if this sensor is blocked
+            cout << "powercell in position 5" << endl;
          } else {
-            cout << "ball not in position 1" << endl; 
+            cout << "powercell NOT in position 5" << endl; 
          } 
-         prevconveyorDIO1 = conveyorDIO1.Get();
+      }
+      if (  sCurrState.powercellInIntake &&
+           !sCurrState.powercellInPosition5 ) {
+            // for testing only, until we connect the real conveyor motors
+         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.2 );
+      } else {
+         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0 );
       }
    }
 
@@ -1197,8 +1233,10 @@ leftMotorOutput = 0.0;
 
       // RunShooter();
 
-      RunClimber();
       RunConveyor();
+
+      RunClimberPole();
+      RunClimberWinch();
       SwitchCameraIfNecessary();
 
 
