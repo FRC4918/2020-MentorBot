@@ -51,6 +51,7 @@ class Robot : public frc::TimedRobot {
    WPI_VictorSPX m_motorRSSlave1{  1 };   // Right side slave motor
    WPI_TalonSRX m_motorTopShooter{ 2 };   // top motor on shooter
    WPI_TalonSRX m_motorBotShooter{ 9 };   // bottom motor on shooter
+   WPI_TalonSRX m_motorClimberPole{ 15 }; // telescoping pole motor
 
    PigeonIMU    pigeonIMU{ 1 };
 
@@ -819,26 +820,28 @@ leftMotorOutput = 0.0;
       static int iCallCount = 0;
       iCallCount++;
 
-
       if (sCurrState.conButton[1] && sCurrState.conButton[3] ) {
-
-         m_motorTopShooter.Set( ControlMode::PercentOutput,
+         m_motorClimberPole.Set( ControlMode::PercentOutput,
                                  1.0*sCurrState.joyZ);
       
       } else if ( sCurrState.conButton[1] ){
-         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.2 );
+         m_motorClimberPole.Set( ControlMode::PercentOutput, 0.2 );
 
       } else if (sCurrState.conButton[3] ) {
-         m_motorTopShooter.Set( ControlMode::PercentOutput, -0.2);
+         m_motorClimberPole.Set( ControlMode::PercentOutput, -0.2);
            
       } else { 
-         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0);
+         m_motorClimberPole.Set( ControlMode::PercentOutput, 0.0);
       }
       
       if ( 0 == iCallCount%50 ) {
           // cout << "ClimberUp; " << setw(5) <<
-          //      m_motorTopShooter.GetStatorCurrent() << "A" << endl;
-         
+          //      m_motorClimberPole.GetStatorCurrent() << "A" << endl;
+         if ( m_motorClimberPole.IsFwdLimitSwitchClosed() ) {
+            cout << "Climber pole at top." << endl;
+         } else if ( m_motorClimberPole.IsRevLimitSwitchClosed() ) {
+            cout << "Climber pole at bottom." << endl;
+         } 
       }
    }
 
@@ -979,7 +982,7 @@ leftMotorOutput = 0.0;
       } else {
          m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0 );
       }
-   }
+   }   // RunConveyor()
 
       /*---------------------------------------------------------------------*/
       /* SwitchCameraIfNecessary()                                           */
@@ -1028,6 +1031,7 @@ leftMotorOutput = 0.0;
       motorInit( m_motorRSMaster );
       motorInit( m_motorTopShooter );
       motorInit( m_motorBotShooter );
+      motorInit( m_motorClimberPole );
                                     // invert encoder value positive/negative
                                     // and motor direction, for some motors.
       m_motorLSMaster.SetSensorPhase(true);
@@ -1038,6 +1042,8 @@ leftMotorOutput = 0.0;
       // m_motorTopShooter.SetInverted(false);
       m_motorBotShooter.SetSensorPhase(false);
       // m_motorBotShooter.SetInverted(false);
+      m_motorClimberPole.SetSensorPhase(false);
+      m_motorClimberPole.SetInverted(false);
 
             /* Set Closed Loop PIDF gains in slot0 - see documentation */
                                                     // if encoder is connected
