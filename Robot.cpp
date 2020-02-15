@@ -909,12 +909,24 @@ leftMotorOutput = 0.0;
             cout << "powercell NOT in position 5" << endl; 
          } 
       }
-      if (  sCurrState.powercellInIntake &&
-           !sCurrState.powercellInPosition5 ) {
+      if ( sCurrState.conButton[11] ) {             // Is manual mode selected?
+         if ( sCurrState.conButton[2] )   {            // Run conveyor forward.
+            m_motorClimberPole.Set( ControlMode::PercentOutput, 0.2 );
+         } else if ( sCurrState.conButton[4] ) {     // Run conveyor backwards.
+            m_motorClimberPole.Set( ControlMode::PercentOutput, -0.2 );
+         } else {                                         // Stop the conveyor.
+                 // comment out for now, until we get a dedicated motor
+                 // for this which doesn't compete with RunClimberPole().
+            // m_motorClimberPole.Set( ControlMode::PercentOutput, 0.0);
+         } 
+      } else {  
+         if (  sCurrState.powercellInIntake &&
+              !sCurrState.powercellInPosition5 ) {
             // for testing only, until we connect the real conveyor motors
-         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.2 );
-      } else {
-         m_motorTopShooter.Set( ControlMode::PercentOutput, 0.0 );
+            m_motorClimberPole.Set( ControlMode::PercentOutput, 0.2 );
+         } else {
+            m_motorClimberPole.Set( ControlMode::PercentOutput, 0.0 );
+         } 
       }
    }   // RunConveyor()
 
@@ -953,19 +965,22 @@ leftMotorOutput = 0.0;
          m_motorClimberPole.Set( ControlMode::PercentOutput, 0.0);
       }
       
-      if ( 0 == iCallCount%50 ) {                            // every 2 seconds
-         if ( sCurrState.conButton[1] ) {
-            cout << "ClimberUp: ";
-         } else {
-            cout << "ClimberDown: ";
-         }
-         cout << setw(5) <<
+
+      if ( 0 == iCallCount%50 ) { 
+         if ( sCurrState.conButton[1] || sCurrState.conButton[3] ) {                            // every 2 seconds
+            if ( sCurrState.conButton[1] ) {
+               cout << "ClimberUp: ";
+            } else {
+               cout << "ClimberDown: ";
+            }
+            cout << setw(5) <<
                m_motorClimberPole.GetStatorCurrent() << "A" << endl;
-         if ( m_motorClimberPole.IsFwdLimitSwitchClosed() ) {
-            cout << "Climber pole at top." << endl;
-         } else if ( m_motorClimberPole.IsRevLimitSwitchClosed() ) {
-            cout << "Climber pole at bottom." << endl;
-         } 
+            if ( m_motorClimberPole.IsFwdLimitSwitchClosed() ) {
+               cout << "Climber pole at top." << endl;
+            } else if ( m_motorClimberPole.IsRevLimitSwitchClosed() ) {
+               cout << "Climber pole at bottom." << endl;
+            }  
+         }
       }
    }      // RunClimberPole() 
 
