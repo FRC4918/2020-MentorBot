@@ -753,6 +753,54 @@ leftMotorOutput = 0.0;
    }      // RunDriveMotors()
 
 
+      /*---------------------------------------------------------------------*/
+      /* TurnToHeading()                                                     */
+      /* This function turns the robot to a specified heading.               */
+      /* heading is a parameter, in the same degree units as the Pigeon IMU  */
+      /* produces; it is positive for left turns (the same as trigonometry,  */
+      /* but the opposite of ordinary 0-360 degree compass directions).      */
+      /* This function returns false if the heading has not been reached     */
+      /* yet, and returns true when the heading has been reached.            */
+      /*---------------------------------------------------------------------*/
+   bool TurnToHeading ( double heading ) {
+      bool bReturnValue = false;
+      if ( sCurrState.yawPitchRoll[0] < heading ) { // do we need to turn left?
+                                                // If we have a long way to go,
+         if ( sCurrState.yawPitchRoll[0] < heading-50.0 ) {   // turn left fast
+            LSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+            bReturnValue = false;
+                                            // else if a medium way to go, turn
+         } else if ( sCurrState.yawPitchRoll[0] < heading-10.0 ) { // left slow
+            LSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+            bReturnValue = false;
+         } else {                              // else we're done; stop turning
+            LSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;  
+            bReturnValue = true; 
+         }
+      } else {                                    // else we need to turn right
+                                                // If we have a long way to go,
+         if ( heading+50.0 < sCurrState.yawPitchRoll[0] ) {  // turn right fast
+            LSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
+            bReturnValue = false;
+                                            // else if a medium way to go, turn
+         }else if ( heading+10.0 < sCurrState.yawPitchRoll[0] ) { // right slow
+            LSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
+            bReturnValue = false;
+         } else {                              // else we're done; stop turning
+            LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
+            bReturnValue = true;
+         }
+      }
+      return bReturnValue;
+   }
+
+
          /*------------------------------------------------------------------*/
          /* RunShooter()                                                     */
          /* RunShooter() drives the 2 shooter motors.  It uses joystick and  */
@@ -877,24 +925,41 @@ leftMotorOutput = 0.0;
       /*---------------------------------------------------------------------*/
    void RunClimberPole( void ) {
       static int iCallCount = 0;
+      static bool limitSwitchHasBeenHit = false;
       iCallCount++;
 
       if (sCurrState.conButton[1] && sCurrState.conButton[3] ) {
          m_motorClimberPole.Set( ControlMode::PercentOutput,
-                                 1.0*sCurrState.joyZ);
+                                 0.5*sCurrState.joyZ);
       
       } else if ( sCurrState.conButton[1] ){
-         m_motorClimberPole.Set( ControlMode::PercentOutput, 0.2 );
-
+         if ( !sPrevState.conButton[1] ) {         // if button 1 has just been
+            limitSwitchHasBeenHit = false;         // pressed, reset to start
+         }
+         if ( limitSwitchHasBeenHit ) {
+                 // we are at the top; just supply a little power to stay there
+            m_motorClimberPole.Set( ControlMode::PercentOutput, 0.10 );
+         } else {
+                                                   // apply full climbing power
+            m_motorClimberPole.Set( ControlMode::PercentOutput, 0.35 );
+            if ( m_motorClimberPole.IsFwdLimitSwitchClosed() ) {
+               limitSwitchHasBeenHit = true;
+            }
+         }
       } else if (sCurrState.conButton[3] ) {
-         m_motorClimberPole.Set( ControlMode::PercentOutput, -0.2);
+         m_motorClimberPole.Set( ControlMode::PercentOutput, -0.05);
            
       } else { 
          m_motorClimberPole.Set( ControlMode::PercentOutput, 0.0);
       }
       
-      if ( 0 == iCallCount%50 ) {
-         cout << "ClimberUp; " << setw(5) <<
+      if ( 0 == iCallCount%50 ) {                            // every 2 seconds
+         if ( sCurrState.conButton[1] ) {
+            cout << "ClimberUp: ";
+         } else {
+            cout << "ClimberDown: ";
+         }
+         cout << setw(5) <<
                m_motorClimberPole.GetStatorCurrent() << "A" << endl;
          if ( m_motorClimberPole.IsFwdLimitSwitchClosed() ) {
             cout << "Climber pole at top." << endl;
@@ -1148,27 +1213,6 @@ leftMotorOutput = 0.0;
 
    }
 
-      /*---------------------------------------------------------------------*/
-      /* TurnToHeading()                                                     */
-      /* This function turns the robot to a specified heading.               */
-      /* It returns false if the heading has not been reached yet, and       */
-      /* returns true the heading has been reached.                          */
-      /*---------------------------------------------------------------------*/
-   bool TurnToHeading ( double heading ) {
-      if ( sCurrState.yawPitchRoll[0] < heading-50.0 ) {
-         LSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
-         return false;
-      } else if ( sCurrState.yawPitchRoll[0] < heading-10.0 ) {
-         LSMotorState.targetVelocity_UnitsPer100ms = 200.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms = 200.0 * 4096 / 600;
-         return false;
-      } else {
-         LSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;  
-         return true; 
-      }  
-   }
 
       /*---------------------------------------------------------------------*/
       /* AutonomousPeriodic()                                                */
@@ -1196,7 +1240,7 @@ leftMotorOutput = 0.0;
 
       if (iCallCount<200) {
          if ( sCurrState.conButton[10]){
-            if ( TurnToHeading( sCurrState.initialYaw+90.0 ) ) {
+            if ( TurnToHeading( sCurrState.initialYaw+270.0 ) ) {
                iCallCount=200;
             }
          } else if ( sCurrState.conButton[11]) {
@@ -1275,7 +1319,7 @@ leftMotorOutput = 0.0;
 
       sPrevState = sCurrState;
 
-      if ( 0 == iCallCount%100 )  {   // every 2 seconds
+      if ( 0 == iCallCount%1000 )  {   // every 20 seconds
          cout << "TelPeriodic loop duration: ";
          cout << frc::GetTime() - dTimeOfLastCall << endl;
                // use frc:Timer::GetFPGATimestamp() instead?
