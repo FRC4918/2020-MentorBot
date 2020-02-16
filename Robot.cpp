@@ -78,6 +78,10 @@ class Robot : public frc::TimedRobot {
       double conY;
       bool   joyButton[12];
       bool   conButton[13];
+      int    iLSMasterPosition;
+      int    iRSMasterPosition;
+      int    iLSMasterVelocity;
+      int    iRSMasterVelocity;
       double yawPitchRoll[3];  // data from Pigeon IMU
       double initialYaw;
       bool   powercellInIntake;
@@ -320,6 +324,11 @@ class Robot : public frc::TimedRobot {
          sCurrState.conButton[iLoopCount] = m_console.GetRawButton(iLoopCount);
       }
       sCurrState.conButton[12] = m_console.GetRawButton(12);
+
+      sCurrState.iLSMasterPosition = m_motorLSMaster.GetSelectedSensorPosition();
+      sCurrState.iRSMasterPosition = m_motorRSMaster.GetSelectedSensorPosition();
+      sCurrState.iLSMasterVelocity = m_motorLSMaster.GetSelectedSensorVelocity();
+      sCurrState.iRSMasterVelocity = m_motorRSMaster.GetSelectedSensorVelocity();
 
       pigeonIMU.GetYawPitchRoll( sCurrState.yawPitchRoll );
 
@@ -798,7 +807,61 @@ leftMotorOutput = 0.0;
          }
       }
       return bReturnValue;
-   }
+   }      // TurnToHeading()
+
+
+      /*---------------------------------------------------------------------*/
+      /* DriveToDistance()                                                   */
+      /* This function drives the robot on a specified heading,              */
+      /* to a specified distance.                                            */
+      /* heading is a parameter, in the same degree units as the Pigeon IMU  */
+      /* produces; it is positive for left turns (the same as trigonometry,  */
+      /* but the opposite of ordinary 0-360 degree compass directions).      */
+      /* distance is a parameter, in feet.                                   */
+      /* This function returns false if the distance has not been reached    */
+      /* yet, and returns true when the distance has been reached.           */
+      /*---------------------------------------------------------------------*/
+   bool DriveToDistance( double heading, double distance ) {
+      static bool bReturnValue = true;
+      static int  iLSStartPosition = 0;
+      static int  iRSStartPosition = 0;
+      int         iDistanceDriven;    // distance driven in encoder ticks
+      double      dDistanceDriven;    // distance driven in feet (floating pt.)
+      double      dDesiredSpeed;  // -1.0 to +1.0, positive is forward
+      double      dDesiredTurn;   // -1.0 to +1.0, positive is to the right
+
+      if ( bReturnValue ) {
+         iLSStartPosition = sCurrState.iLSMasterPosition;
+         iRSStartPosition = sCurrState.iRSMasterPosition;
+      }
+      iDistanceDriven =
+                   ( ( sCurrState.iLSMasterPosition - iLSStartPosition ) +
+                     ( sCurrState.iRSMasterPosition - iRSStartPosition ) ) / 2;
+      dDistanceDriven = iDistanceDriven * 3.1415 * 3.0 / 4096.0 / 12.0;
+
+      if ( dDistanceDriven < distance ) {
+         if ( dDistanceDriven < distance - 10.0 ) {
+            dDesiredSpeed = 1.0;
+         } else {
+            dDesiredSpeed = 0.1 + ( distance - dDistanceDriven ) / 10.0;
+         }
+         if ( sCurrState.yawPitchRoll[0] < heading-50.0 ) {
+            dDesiredTurn = -0.2;
+         } else if ( heading+50.0 < sCurrState.yawPitchRoll[0] ) {
+            dDesiredTurn = 0.2;
+         } else {
+            dDesiredTurn = ( sCurrState.yawPitchRoll[0]-heading ) * 0.2/50.0;
+         }
+         
+         Team4918Drive( dDesiredSpeed, dDesiredTurn );
+         bReturnValue = false;   // tell caller we are still driving
+      } else {
+         Team4918Drive( 0.0, 0.0 );   // stop the robot
+         bReturnValue = true;    // tell caller we've reached desired distance
+      }
+
+      return bReturnValue;
+   }  // DriveToDistance()
 
 
          /*------------------------------------------------------------------*/
@@ -1236,13 +1299,7 @@ leftMotorOutput = 0.0;
       /*---------------------------------------------------------------------*/
    void AutonomousPeriodic() override {
 
-      static double initialHeading = 0;
-
       GetAllVariables();
-
-      if ( iCallCount < 1 ) {
-         initialHeading = sCurrState.yawPitchRoll[0]>sCurrState.initialYaw;
-      }
 
       iCallCount++;
 
@@ -1325,7 +1382,7 @@ leftMotorOutput = 0.0;
 
       // RunShooter();
 
-      RunConveyor();
+      // RunConveyor();
 
       RunClimberPole();
       RunClimberWinch();
