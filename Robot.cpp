@@ -62,9 +62,9 @@ class Robot : public frc::TimedRobot {
    float drivePowerFactor = 0.8;
    frc::Joystick m_stick{0};
    frc::Joystick m_console{1};
-   frc::DifferentialDrive m_drive{ m_motorLSMaster, m_motorRSMaster };
+   // frc::DifferentialDrive m_drive{ m_motorLSMaster, m_motorRSMaster };
    //frc::PowerDistributionPanel pdp{0};
-   frc::AnalogInput DistSensor1{0};
+   frc::AnalogInput distSensor0{0};
    frc::BuiltInAccelerometer RoborioAccel{};
 
    std::shared_ptr<NetworkTable> limenttable =
@@ -107,6 +107,7 @@ class Robot : public frc::TimedRobot {
       int  Y;
       int  Radius;
       bool SwitchToColorWheelCam;
+      bool TestMode;
    } powercellOnVideo;
 
  private:
@@ -134,6 +135,7 @@ class Robot : public frc::TimedRobot {
       int iBiggestCircleIndex = -1;
       int iBiggestCircleRadius = -1;
 
+      bool bDiagnosticMode = false;
 
       cs::UsbCamera camera =
                  frc::CameraServer::GetInstance()->StartAutomaticCapture(1);
@@ -149,15 +151,17 @@ class Robot : public frc::TimedRobot {
       powercellOnVideo.Y = 0;                 // actually see one!
       powercellOnVideo.Radius = -1;
       powercellOnVideo.SwitchToColorWheelCam = false;
+      powercellOnVideo.TestMode = false;
 
       cs::CvSink cvSink = frc::CameraServer::GetInstance()->GetVideo();
       cs::CvSource outputStreamStd =
-              frc::CameraServer::GetInstance()->PutVideo( "Gray", 160, 120 );
+              frc::CameraServer::GetInstance()->PutVideo( "Gray", 320, 240 );
               //frc::CameraServer::GetInstance()->GetVideo();
       cv::Mat source;
       cv::Mat output;
       cv::Mat hsvImg;
       cv::Mat threshImg;
+      cv::Mat *pOutput;
 
       std::vector<Vec3f> v3fCircles;      // 3-element vector of floats;
                                           // this will be the pass-by reference
@@ -177,6 +181,7 @@ class Robot : public frc::TimedRobot {
       cvSink.SetSource( camera );
       while( true ) {
          static int iFrameCount = 0;
+         static int iLoopCount  = 0;
 
          if ( powercellOnVideo.SwitchToColorWheelCam &&
               !prevSwitchToColorWheelCam ) {
@@ -186,6 +191,18 @@ class Robot : public frc::TimedRobot {
                      prevSwitchToColorWheelCam ) {
             cvSink.SetSource( camera );     // switch back to powercell camera
             prevSwitchToColorWheelCam = powercellOnVideo.SwitchToColorWheelCam;
+            bDiagnosticMode = !bDiagnosticMode;       // toggle diagnostic mode
+            cout << "mel says diagnostic mode was changed" <<endl;
+            cout << bDiagnosticMode <<endl; 
+         }
+
+                   // set the pointer to the frame to be sent to DriverStation
+         if ( bDiagnosticMode ) {
+            pOutput = &threshImg;   // diagnostic image (shows where yellow is)
+         } else if ( powercellOnVideo.SwitchToColorWheelCam ) {
+            pOutput = &source;          // full-color, direct from videocamera
+         } else {
+            pOutput = &output;            // gray-scale image, for low latency
          }
 
          usleep( 1000 );                               // wait one millisecond
@@ -228,18 +245,30 @@ class Robot : public frc::TimedRobot {
                                " (" << v3fCircles[i][0] - threshImg.cols / 2 <<
                                ", " << threshImg.rows / 2 - v3fCircles[i][1] <<
                                ")" << endl;
+
+                  std::cout << "Video Frame Cols/Rows: ";
+                  std::cout << hsvImg.cols << "/" << hsvImg.rows << endl;
+                  std::cout << "Center pixel H/S/V: ";
+                                     // make a copy of the center pixel vector
+                  cv::Vec3b pixel = hsvImg.at<cv::Vec3b>( hsvImg.rows/2,
+                                                          hsvImg.cols/2);
+                  std::cout << "pixel: " << (int)(pixel[0]) << "/" <<
+                                            (int)(pixel[1]) << "/" <<
+                                            (int)(pixel[2]) << endl;
+
                   std::cout << "Vision Processing duration: ";
                   std::cout << frc::GetTime() - dTimeOfLastCall << endl;
-                                  // use frc:Timer::GetFPGATimestamp() instead?
-               }
+                                  // use frpc:Timer::GetFPGATimestamp() instead?
+               }      // if on a 10-second boundary
 
                      // if a bigger circle has been found than any found before
                if ( iBiggestCircleRadius < (int)v3fCircles[i][2] ) {
                   iBiggestCircleIndex = i;
                   iBiggestCircleRadius = (int)v3fCircles[i][2];
                }
+
                         // draw small green circle at center of object detected
-               cv::circle( output,                 // draw on original image
+               cv::circle( *pOutput,             // draw on DriverStation image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            3,                     // radius of circle in pixels
@@ -247,13 +276,13 @@ class Robot : public frc::TimedRobot {
                            CV_FILLED );                            // thickness
 
                                       // draw red circle around object detected 
-               cv::circle( output,                 // draw on original image
+               cv::circle( *pOutput,          // draw on DriverStation image
                            cv::Point( (int)v3fCircles[i][0],       // center of
                                       (int)v3fCircles[i][1] ),     // circle
                            (int)v3fCircles[i][2], // radius of circle in pixels
                            cv::Scalar(0, 0, 255),                   // draw red
                            3 );                                    // thickness
-            }
+            }      // for every circle found
 
             if ( -1 < iBiggestCircleIndex ) {  // if at least one ball was seen
                    // Then save all the info so other code can drive toward it.
@@ -270,11 +299,41 @@ class Robot : public frc::TimedRobot {
                powercellOnVideo.SeenByCamera = false;
             }
 
-            outputStreamStd.PutFrame( output );
-            //outputStreamStd.PutFrame( threshImg );
+            if ( powercellOnVideo.TestMode ) {              // if in Test Mode
+                           // display the H/S/V values every couple of seconds
+               if ( 0 == iFrameCount%30 ) {
+                  std::cout << "Center pixel H/S/V: ";
+                                     // make a copy of the center pixel vector
+                  cv::Vec3b pixel = hsvImg.at<cv::Vec3b>( hsvImg.rows/2,
+                                                          hsvImg.cols/2 );
+                  std::cout << "pixel: " << (int)(pixel[0]) << "/" <<
+                                            (int)(pixel[1]) << "/" <<
+                                            (int)(pixel[2]) << endl;
+               }
+
+                            // draw small blue circle at center of video frame
+               cv::circle( *pOutput,                 // draw on original image
+                           cv::Point( hsvImg.cols/2,        // center of frame
+                                      hsvImg.rows/2 ),
+                           6,                    // radius of circle in pixels
+                           cv::Scalar( 255, 255, 255 ),          // draw white
+                           2 );                                   // thickness
+                                                       // draw small blue circle at center of video frame
+               cv::circle( *pOutput,                 // draw on original image
+                           cv::Point( hsvImg.cols/2,        // center of frame
+                                      hsvImg.rows/2 ),
+                           8,                    // radius of circle in pixels
+                           cv::Scalar( 0, 0, 0 ),                // draw black
+                           2 );                                   // thickness
+            }      // if in Test Mode
+
+            outputStreamStd.PutFrame( *pOutput );
+
             v3fCircles.clear();
-         }
-      }
+
+         } // if we got an image
+         iLoopCount++;
+      }   // do while 
    }      // VisionThread() 
 
  public:
@@ -312,7 +371,10 @@ class Robot : public frc::TimedRobot {
       /*---------------------------------------------------------------------*/
    void GetAllVariables()  {
 
-      dTimeOfLastCall = frc::GetTime();   // use frc::Timer::GetFPGATimestamp() instead?
+                                // use frc::Timer::GetFPGATimestamp() instead?
+      dTimeOfLastCall = frc::GetTime();
+
+      sPrevState = sCurrState;                  // save all previous variables
 
       sCurrState.joyX = m_stick.GetX();
       sCurrState.joyY = m_stick.GetY();
@@ -362,11 +424,11 @@ class Robot : public frc::TimedRobot {
       /* Display all the yaw pitch & roll values on the console log.         */
       /*---------------------------------------------------------------------*/
    void IMUOrientationDisplay( void ) {
-         cout << "PigeonIMU (yaw/pitch/roll): " <<
+         cout << "pigeonIMU (yaw/pitch/roll): " <<
                sCurrState.yawPitchRoll[0] << "/" <<
                sCurrState.yawPitchRoll[1] << "/" <<
                sCurrState.yawPitchRoll[2] << endl;
-         cout << "piegontemp: " << pigeonIMU.GetTemp() << endl; 
+         cout << "pigeontemp: " << pigeonIMU.GetTemp() << endl; 
    }      // IMUOrientationDisplay()
 
 
@@ -431,9 +493,9 @@ class Robot : public frc::TimedRobot {
                   /* direction could look like this:                        */
       double  leftMotorOutput = 0.0;
       double rightMotorOutput = 0.0;
-      m_drive.StopMotor();
+      // m_drive.StopMotor();
 #ifndef JAG_NOTDEFINED
-	   if ( ( -0.10 < desiredForward ) && ( desiredForward < 0.10 ) ) {
+      if ( ( -0.10 < desiredForward ) && ( desiredForward < 0.10 ) ) {
          desiredForward = 0.0;
       }
       if ( ( -0.10 < desiredTurn ) && ( desiredTurn < 0.10 ) ) {
@@ -487,6 +549,8 @@ leftMotorOutput = 0.0;
 
       iCallCount++;
 
+      limenttable->PutNumber( "ledMode", 3 );                   // turn LEDs on
+
       if ( 1 == limev )  {                       // if limelight data is valid
          double autoDriveSpeed;
              // limea is the area of the target seen by the limelight camera
@@ -513,20 +577,25 @@ leftMotorOutput = 0.0;
          // May have to add/subtract a constant from limex here, to account
          // for the offset of the camera away from the centerline of the robot.
          if ( aBooleanVariable ) {
-            m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+            // m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+            Team4918Drive( -autoDriveSpeed, 0.0 );
          } else if ( 0 <= limex )  {
                              // if target to the right, turn towards the right
-            m_drive.CurvatureDrive( -autoDriveSpeed, -(limex/30.0), 1 );
+            // m_drive.CurvatureDrive( -autoDriveSpeed, -(limex/30.0), 1 );
+            Team4918Drive( -autoDriveSpeed, -(limex/30.0) );
          } else if ( limex < 0 ) {
                                // if target to the left, turn towards the left
-            m_drive.CurvatureDrive( -autoDriveSpeed, -(limex/30.0), 1 );
+            // m_drive.CurvatureDrive( -autoDriveSpeed, -(limex/30.0), 1 );
+            Team4918Drive( -autoDriveSpeed, -(limex/30.0) );
          } else {
-            m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+            // m_drive.CurvatureDrive( -autoDriveSpeed, 0, 0 );
+            Team4918Drive( -autoDriveSpeed, 0.0 );
          }
 
       } else {                    // else limelight data is not valid any more
          // should we continue forward here?
-         m_drive.CurvatureDrive( 0.0, 0, 0 );                // stop the robot
+         // m_drive.CurvatureDrive( 0.0, 0, 0 );                // stop the robot
+         Team4918Drive( 0.0, 0.0 );
          returnVal = false;
       }
 
@@ -612,7 +681,8 @@ leftMotorOutput = 0.0;
 
       } else {               // else USB videocamera data is not valid any more
          // should we continue forward here?
-         m_drive.CurvatureDrive( 0.0, 0, 0 );                 // stop the robot
+         // m_drive.CurvatureDrive( 0.0, 0, 0 );                 // stop the robot
+         Team4918Drive( 0.0, 0.0 );
          returnVal = false;
       }
 
@@ -668,8 +738,8 @@ leftMotorOutput = 0.0;
       if ( 0 == iCallCount%100 )  {   // every 2 seconds
          //JoystickDisplay();
 
-         //MotorDisplay( "LS:", m_motorLSMaster, LSMotorState );
-         //MotorDisplay( "RS:", m_motorRSMaster, RSMotorState );
+         MotorDisplay( "LS:", m_motorLSMaster, LSMotorState );
+         MotorDisplay( "RS:", m_motorRSMaster, RSMotorState );
          //IMUOrientationDisplay();
 
          // max free speed for MinCims is about 6200
@@ -705,7 +775,7 @@ leftMotorOutput = 0.0;
                      /* using the variables that have been set with the     */
                      /* joystick while button 3 is pressed.                 */
          if ( !sPrevState.joyButton[3] ) {  // if button has just been pressed
-            m_drive.StopMotor();
+            // m_drive.StopMotor();
                                 // Set current sensor positions to zero
             m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
             m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
@@ -719,15 +789,15 @@ leftMotorOutput = 0.0;
          m_motorLSMaster.Set( ControlMode::MotionMagic, sCurrState.joyY*4096 );
          m_motorRSMaster.Set( ControlMode::MotionMagic, sCurrState.joyX*4096 );
 
-                                     /* Button 5 is the Right-most button  */
-                                     /* top, side on the back of the joystick. */
+                                      /* Button 5 is the Right-most button  */
+                                      /* on the back of the joystick.       */
       } else if ( sCurrState.joyButton[5] ) {
          static int iButtonPressCallCount = 0;
          if ( !sPrevState.joyButton[5] ) {  // if button has just been pressed
-            m_drive.StopMotor();
+            // m_drive.StopMotor();
             iButtonPressCallCount = 0;
          }
-         m_drive.StopMotor();    // this is needed to eliminate motor warnings
+         // m_drive.StopMotor();    // this is needed to eliminate motor warnings
 
          if ( iButtonPressCallCount < 50 ) {       // turn motors on gently...
             m_motorLSMaster.Set( ControlMode::Velocity,
@@ -753,8 +823,10 @@ leftMotorOutput = 0.0;
               // X when pushed to the right.
          if ( sCurrState.joyButton[2] ) {
             Team4918Drive( sCurrState.joyY, sCurrState.joyX );
+            limenttable->PutNumber( "ledMode", 3 );   // turn Limelight LEDs on
          } else {
             Team4918Drive( -sCurrState.joyY, sCurrState.joyX );
+            limenttable->PutNumber( "ledMode", 1 );  // turn Limelight LEDs off
          }
 
       }
@@ -768,21 +840,38 @@ leftMotorOutput = 0.0;
       /* heading is a parameter, in the same degree units as the Pigeon IMU  */
       /* produces; it is positive for left turns (the same as trigonometry,  */
       /* but the opposite of ordinary 0-360 degree compass directions).      */
-      /* This function returns false if the heading has not been reached     */
-      /* yet, and returns true when the heading has been reached.            */
+      /* bInit is a boolean that tells the function to initialize (to record */
+      /* the current yaw as the starting yaw).                               */
+      /* This function returns false if the yaw value has not been reached   */
+      /* yet, and returns true when the yaw has been reached.                */
       /*---------------------------------------------------------------------*/
-   bool TurnToHeading ( double heading ) {
-      bool bReturnValue = false;
+   bool OldTurnToHeading ( double heading ) {
+      static bool bReturnValue = true;
+      static double startYaw = 0;
+
+      if ( bReturnValue ) {
+         startYaw = sCurrState.yawPitchRoll[0];
+	 cout << "TurnToHeading(): startYaw = " << startYaw << endl;
+      }
+
       if ( sCurrState.yawPitchRoll[0] < heading ) { // do we need to turn left?
-                                                // If we have a long way to go,
+                                                // If we have a long way to go,  
          if ( sCurrState.yawPitchRoll[0] < heading-50.0 ) {   // turn left fast
-            LSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
-            bReturnValue = false;
-                                            // else if a medium way to go, turn
-         } else if ( sCurrState.yawPitchRoll[0] < heading-10.0 ) { // left slow
-            LSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms = 150.0 * 4096 / 600;
+            if ( sCurrState.yawPitchRoll[0]-50 <startYaw){
+               LSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;
+               //LSMotorState.targetVelocity_UnitsPer100ms = 0.0;
+               RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+            } else {
+               LSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+               RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600;
+            }
+            bReturnValue = false;           // else if a medium way to go, turn
+         } else if ( sCurrState.yawPitchRoll[0] < heading-5.0 ) {  // left slow
+            LSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600 *
+		                   (heading - sCurrState.yawPitchRoll[0])/50.0;
+            //LSMotorState.targetVelocity_UnitsPer100ms = 0.0;
+            RSMotorState.targetVelocity_UnitsPer100ms = 300.0 * 4096 / 600 *
+		                   (heading - sCurrState.yawPitchRoll[0])/50.0;
             bReturnValue = false;
          } else {                              // else we're done; stop turning
             LSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;
@@ -793,19 +882,91 @@ leftMotorOutput = 0.0;
                                                 // If we have a long way to go,
          if ( heading+50.0 < sCurrState.yawPitchRoll[0] ) {  // turn right fast
             LSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
+            //RSMotorState.targetVelocity_UnitsPer100ms = -500.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = 0.0;
             bReturnValue = false;
                                             // else if a medium way to go, turn
-         }else if ( heading+10.0 < sCurrState.yawPitchRoll[0] ) { // right slow
-            LSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
+         }else if ( heading+5.0 < sCurrState.yawPitchRoll[0] ) {  // right slow
+            LSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600 *
+		                     (sCurrState.yawPitchRoll[0]-heading)/50.0;
+            RSMotorState.targetVelocity_UnitsPer100ms = -100.0 * 4096 / 600 *
+		                     (sCurrState.yawPitchRoll[0]-heading)/50.0;
+            //RSMotorState.targetVelocity_UnitsPer100ms = 0.0;
             bReturnValue = false;
          } else {                              // else we're done; stop turning
-            LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
-            RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
+            LSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;
+            RSMotorState.targetVelocity_UnitsPer100ms = 0.0 * 4096 / 600;
             bReturnValue = true;
          }
       }
+      if ( bReturnValue ) {
+         cout << "TurnToHeading() returning TRUE!!!!!!!!!" << endl;
+      }
+      return bReturnValue;
+   }      // OldTurnToHeading()
+
+
+   bool TurnToHeading ( double desiredYaw, bool bInit ) {
+      static bool   bReturnValue = true;
+      static double startYaw = 0;
+
+      double      currentYaw = sCurrState.yawPitchRoll[0];
+      double      prevYaw    = sPrevState.yawPitchRoll[0];
+
+      static double dDesiredSpeed = 0.01; // -1.0 to +1.0, positive is forward
+      static double dDesiredTurn = 0.0;  // -1.0 to +1.0, positive to the right
+
+                 // If we've been told to initialize, or the last call returned
+                 // true (indicating that we finished the previous turn).
+      if ( bInit || bReturnValue ) {
+         startYaw = currentYaw;
+         dDesiredSpeed = 0.01;
+	 cout << "TurnToHeading(): startYaw = " << startYaw;
+	 cout << " desiredYaw = " << desiredYaw << endl;
+      }
+        // calculate desired turn speed, with 100% if off by 50 degrees or more
+      dDesiredTurn = ( currentYaw-desiredYaw ) * 1.0/50.0;
+
+                       // If we're turning at less than 50 degrees per second,
+      if ( std::abs( currentYaw - prevYaw ) < 1.0 ) {
+           // Increase the forward speed, to reduce friction and ease the turn.
+         dDesiredSpeed = std::min( 1.0,  dDesiredSpeed * 1.1 );
+      } else {                // Else we're turning at a good speed, so
+                              // reduce the forward speed, to tighten the turn.
+         dDesiredSpeed = std::max( 0.01, dDesiredSpeed * 0.9 );
+      }
+
+      if ( startYaw < desiredYaw ) {                // Do we need to turn left?
+	                                  // dDesiredTurn is left negative, but
+                            	          // *Yaw variables are left positive.
+         if ( currentYaw < desiredYaw-5.0 ) {        // Should we keep turning?
+            bReturnValue = false;
+         } else {                              // else we're done; stop turning
+            dDesiredSpeed = 0.0;
+            bReturnValue = true; 
+         }
+      } else {                                   // Else we need to turn right.
+                                                // If we have a long way to go,
+         if ( desiredYaw+5.0 < currentYaw ) {        // Should we keep turning?
+            bReturnValue = false;
+         } else {                              // else we're done; stop turning
+            dDesiredSpeed = 0.0;
+            bReturnValue = true;
+         }
+      }
+      dDesiredSpeed = std::min(  1.0, dDesiredSpeed );
+      dDesiredTurn  = std::min(  1.0, dDesiredTurn  );
+      dDesiredSpeed = std::max( -1.0, dDesiredSpeed );
+      dDesiredTurn  = std::max( -1.0, dDesiredTurn  );
+
+//    cout << "Turn2Hdg(): " << dDesiredSpeed << ", " << dDesiredTurn << endl;
+      Team4918Drive( dDesiredSpeed, dDesiredTurn );
+
+      if ( bReturnValue ) {
+         cout << "TurnToHeading() returning TRUE!!!!!!!!!" << endl;
+         cout << "Final yaw: " <<  currentYaw << endl;
+      }
+
       return bReturnValue;
    }      // TurnToHeading()
 
@@ -814,14 +975,19 @@ leftMotorOutput = 0.0;
       /* DriveToDistance()                                                   */
       /* This function drives the robot on a specified heading,              */
       /* to a specified distance.                                            */
-      /* heading is a parameter, in the same degree units as the Pigeon IMU  */
-      /* produces; it is positive for left turns (the same as trigonometry,  */
-      /* but the opposite of ordinary 0-360 degree compass directions).      */
-      /* distance is a parameter, in feet.                                   */
+      /* desiredYaw is a parameter, in the same degree units as the Pigeon   */
+      /* IMU produces; it is positive for left turns (the same as            */
+      /* trigonometry, but the opposite of ordinary 0-360 degree compass     */
+      /* directions).                                                        */
+      /* desiredDistance is a parameter, in feet.                            */
+      /* bInit is a boolean that tells the function to initialize (to record */
+      /* the current position as the starting position).                     */
       /* This function returns false if the distance has not been reached    */
       /* yet, and returns true when the distance has been reached.           */
       /*---------------------------------------------------------------------*/
-   bool DriveToDistance( double heading, double distance ) {
+   bool DriveToDistance( double desiredYaw,
+               	       double desiredDistance,
+                         bool   bInit            ) {
       static bool bReturnValue = true;
       static int  iLSStartPosition = 0;
       static int  iRSStartPosition = 0;
@@ -830,27 +996,51 @@ leftMotorOutput = 0.0;
       double      dDesiredSpeed;  // -1.0 to +1.0, positive is forward
       double      dDesiredTurn;   // -1.0 to +1.0, positive is to the right
 
-      if ( bReturnValue ) {
+          // If we've been told to initialize, or the last call returned
+          // true (indicating that we finished the previous drive to distance).
+      if ( bInit || bReturnValue ) {
          iLSStartPosition = sCurrState.iLSMasterPosition;
          iRSStartPosition = sCurrState.iRSMasterPosition;
       }
       iDistanceDriven =
                    ( ( sCurrState.iLSMasterPosition - iLSStartPosition ) +
                      ( sCurrState.iRSMasterPosition - iRSStartPosition ) ) / 2;
+              // Convert encoder ticks to feet, using the radius of the wheels,
+              // the number of ticks/revolution, and the number of inches/foot.
       dDistanceDriven = iDistanceDriven * 3.1415 * 3.0 / 4096.0 / 12.0;
-
-      if ( dDistanceDriven < distance ) {
-         if ( dDistanceDriven < distance - 10.0 ) {
-            dDesiredSpeed = 1.0;
-         } else {
-            dDesiredSpeed = 0.1 + ( distance - dDistanceDriven ) / 10.0;
+                                         // if we haven't driven far enough yet
+      if ( std::abs( dDistanceDriven ) < std::abs( desiredDistance ) ) {
+         if ( 0.0 < desiredDistance ) {             // If we're driving forward
+                                      // and still have more than 10 feet to go
+            if ( dDistanceDriven < desiredDistance - 10.0 ) {
+               dDesiredSpeed = 1.0;                            // go full speed
+            } else {
+                   // Otherwise speed is proportional to distance still needed.
+               dDesiredSpeed = 0.1 +
+		                  ( desiredDistance - dDistanceDriven ) / 10.0;
+            }
+         } else {                               // else we're driving backwards
+                                      // and still have more than 10 feet to go
+            if ( desiredDistance + 10.0 < dDistanceDriven ) {
+               dDesiredSpeed = -1.0;               // go full speed (backwards)
+            } else {
+                   // Otherwise speed is proportional to distance still needed.
+               dDesiredSpeed = -0.1 +
+		                  ( desiredDistance - dDistanceDriven ) / 10.0;
+            }
          }
-         if ( sCurrState.yawPitchRoll[0] < heading-50.0 ) {
+
+         if ( sCurrState.yawPitchRoll[0] < desiredYaw-50.0 ) {
             dDesiredTurn = -0.2;
-         } else if ( heading+50.0 < sCurrState.yawPitchRoll[0] ) {
+         } else if ( desiredYaw+50.0 < sCurrState.yawPitchRoll[0] ) {
             dDesiredTurn = 0.2;
          } else {
-            dDesiredTurn = ( sCurrState.yawPitchRoll[0]-heading ) * 0.2/50.0;
+            dDesiredTurn = (sCurrState.yawPitchRoll[0]-desiredYaw) * 0.2/50.0;
+            if ( ( 0.02 < dDesiredTurn ) && ( dDesiredTurn ) < 0.1 ) {
+               dDesiredTurn = 0.1;
+            } else if ( ( -0.1 < dDesiredTurn ) && ( dDesiredTurn < -0.02 ) ) {
+               dDesiredTurn = -0.1;
+            }
          }
          
          Team4918Drive( dDesiredSpeed, dDesiredTurn );
@@ -858,6 +1048,12 @@ leftMotorOutput = 0.0;
       } else {
          Team4918Drive( 0.0, 0.0 );   // stop the robot
          bReturnValue = true;    // tell caller we've reached desired distance
+      }
+
+      if ( bReturnValue ) {
+         cout << "DriveToDistance() returning TRUE!!!!!!!!!" << endl;
+         cout << "Final Distance: " <<  dDistanceDriven << endl;
+         cout << " Final Yaw: " <<  sCurrState.yawPitchRoll[0] << endl;
       }
 
       return bReturnValue;
@@ -1115,7 +1311,7 @@ leftMotorOutput = 0.0;
       m_motor.ConfigPeakOutputReverse(   -1, 10 );
 
             /* Set limits to how much current will be sent through the motor */
-      m_motor.ConfigPeakCurrentLimit(40);    // 60 works here for miniCIMs
+      m_motor.ConfigPeakCurrentLimit(60);    // 60 works here for miniCIMs
       m_motor.ConfigPeakCurrentDuration(1);  // 1000 milliseconds (for 60 Amps)
                                              // works fine here, with 40 for
                                              // ConfigContinuousCurrentLimit(),
@@ -1174,6 +1370,8 @@ leftMotorOutput = 0.0;
          std::thread visionThread(VisionThread);
          visionThread.detach();
       }
+
+      powercellOnVideo.TestMode = false;
 
       m_motorLSSlave1.Follow(m_motorLSMaster);
       m_motorRSSlave1.Follow(m_motorRSMaster);
@@ -1274,6 +1472,42 @@ leftMotorOutput = 0.0;
       /* This function is called once when the robot is disabled.            */
       /*---------------------------------------------------------------------*/
    void DisabledInit() override {
+      powercellOnVideo.TestMode = false;
+   }
+
+
+      /*---------------------------------------------------------------------*/
+      /* TestInit()                                                          */
+      /* This function is called once when the robot enters Test mode.       */
+      /*---------------------------------------------------------------------*/
+   void TestInit() override {
+      limenttable->PutNumber( "ledMode", 1 );                  // turn LEDs off
+      powercellOnVideo.TestMode = true;  // display the center pixel HSV values
+   }
+
+
+      /*---------------------------------------------------------------------*/
+      /* TestPeriodic()                                                      */
+      /* This function is called every 20 milliseconds, as long as the robot */
+      /* is in Test mode.                                                    */
+      /* In this mode the Roborio cannot drive any motors, but it can read   */
+      /* the joystick, joystick/console buttons, and sensors.                */
+      /*---------------------------------------------------------------------*/
+   void TestPeriodic() override {
+      GetAllVariables();
+      iCallCount++;
+
+      SwitchCameraIfNecessary();
+
+      if ( 0 == iCallCount%100 ) {                           // every 2 seconds
+         // cout << "Sonar0 sensor 0: " << distSensor0.GetAverageValue() << endl;
+         // cout << "Sonar0 average voltage:  " << distSensor0.GetAverageVoltage()
+         //      << endl;
+         // cout << "Sonar0 voltage:  " << distSensor0.GetVoltage() << endl;
+             // convert to inches, with 100 centimeters/volt and 2.54 cm/inch
+         cout << "Sonar0 distance: " << distSensor0.GetVoltage() * 100 / 2.54
+              << " inches (" << distSensor0.GetVoltage() << ")." << endl; 
+      }
    }
 
 
@@ -1283,13 +1517,16 @@ leftMotorOutput = 0.0;
       /*---------------------------------------------------------------------*/
    void AutonomousInit() override {
       RobotInit();
+      limenttable->PutNumber( "ledMode", 3 );                   // turn LEDs on
       cout << "shoot 3 balls" << endl;
-      m_drive.StopMotor();
+      // m_drive.StopMotor();
       iCallCount=0;
       GetAllVariables();
-      sCurrState.initialYaw=sCurrState.yawPitchRoll[0]; 
+      sCurrState.initialYaw = sCurrState.yawPitchRoll[0]; 
+      TurnToHeading( sCurrState.initialYaw, true );
+      DriveToDistance( sCurrState.initialYaw, 0.0, true );
 
-   }
+   }      // AutonomousInit()
 
 
       /*---------------------------------------------------------------------*/
@@ -1299,61 +1536,69 @@ leftMotorOutput = 0.0;
       /*---------------------------------------------------------------------*/
    void AutonomousPeriodic() override {
 
+      static double dDesiredYaw = 0.0;
+
       GetAllVariables();
 
       iCallCount++;
 
-      m_drive.StopMotor();
+      // m_drive.StopMotor();
       LSMotorState.targetVelocity_UnitsPer100ms = 0;        // Left Side drive
       RSMotorState.targetVelocity_UnitsPer100ms = 0;        // Right Side drive
 
-      LSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
-      RSMotorState.targetVelocity_UnitsPer100ms = 250.0 * 4096 / 600;
+      dDesiredYaw = sCurrState.initialYaw;
 
       if (iCallCount<200) {
          if ( sCurrState.conButton[10]){
-            if ( TurnToHeading( sCurrState.initialYaw+270.0 ) ) {
-               iCallCount=200;
+            if ( TurnToHeading( sCurrState.initialYaw+270.0, false ) ) {
+               dDesiredYaw = sCurrState.initialYaw + 270.0;
+               iCallCount = 200;
+               m_motorLSMaster.SetIntegralAccumulator( 0.0 );
+               m_motorRSMaster.SetIntegralAccumulator( 0.0 );
             }
          } else if ( sCurrState.conButton[11]) {
-            if (sCurrState.yawPitchRoll[0]>sCurrState.initialYaw-40.0) {
-               LSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
-               RSMotorState.targetVelocity_UnitsPer100ms = -300.0 * 4096 / 600;
-            }else if (sCurrState.yawPitchRoll[0]>sCurrState.initialYaw-80.0) {
-               LSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
-               RSMotorState.targetVelocity_UnitsPer100ms = -150.0 * 4096 / 600;
-            } else {
-               LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
-               RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
-               iCallCount=200;
+            if ( TurnToHeading( sCurrState.initialYaw-90.0, false ) ) {
+               dDesiredYaw = sCurrState.initialYaw - 90.0;
+               iCallCount = 200;
+               m_motorLSMaster.SetIntegralAccumulator( 0.0 );
+               m_motorRSMaster.SetIntegralAccumulator( 0.0 );
             }
-         } else { 
-            iCallCount=200;
+         } else {
+            dDesiredYaw = sCurrState.initialYaw;
+            iCallCount = 200;
          }
       } else if ( iCallCount<250 ) {
-         LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
+                                                       // go backward 2 feet
+         if ( DriveToDistance( dDesiredYaw, -2.0, false ) ) {
+            iCallCount = 250;
+         }
+//         LSMotorState.targetVelocity_UnitsPer100ms = 100.0 * 4096 / 600;
+//         RSMotorState.targetVelocity_UnitsPer100ms =-100.0 * 4096 / 600;
+//         m_motorLSMaster.Set( ControlMode::Velocity, 
+//                              LSMotorState.targetVelocity_UnitsPer100ms );
+//         m_motorRSMaster.Set( ControlMode::Velocity, 
+//                              RSMotorState.targetVelocity_UnitsPer100ms );
       } else {
-         m_motorLSMaster.Config_kF( 0, 0.15, 10 );     // 0.15 normally
-         m_motorRSMaster.Config_kF( 0, 0.15, 10 );
-         LSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
-         RSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+         Team4918Drive( 0.0, 0.0 );
+//         m_motorLSMaster.Config_kF( 0, 0.15, 10 );     // 0.15 normally
+//         m_motorRSMaster.Config_kF( 0, 0.15, 10 );
+//         LSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+//         RSMotorState.targetVelocity_UnitsPer100ms =   0.0 * 4096 / 600;
+//         m_motorLSMaster.Set( ControlMode::Velocity, 
+//                              LSMotorState.targetVelocity_UnitsPer100ms );
+//         m_motorRSMaster.Set( ControlMode::Velocity, 
+//                              RSMotorState.targetVelocity_UnitsPer100ms );
       }
-
-      m_motorLSMaster.Set( ControlMode::Velocity, 
-                           LSMotorState.targetVelocity_UnitsPer100ms);
-      m_motorRSMaster.Set( ControlMode::Velocity, 
-                           RSMotorState.targetVelocity_UnitsPer100ms);
 
       motorFindMinMaxVelocity( m_motorLSMaster, LSMotorState );
       motorFindMinMaxVelocity( m_motorRSMaster, RSMotorState );
 
-      if ( 0 == iCallCount%100 ) {
+      if ( 0 == iCallCount%50 ) {
          MotorDisplay( "LS:", m_motorLSMaster, LSMotorState );
          MotorDisplay( "RS:", m_motorRSMaster, RSMotorState );
          IMUOrientationDisplay();
       }
-   }
+   }      // AutonomousPeriodic()
 
 
       /*---------------------------------------------------------------------*/
@@ -1365,7 +1610,7 @@ leftMotorOutput = 0.0;
                                                     // zero the drive encoders
       m_motorLSMaster.SetSelectedSensorPosition( 0, 0, 10 );
       m_motorRSMaster.SetSelectedSensorPosition( 0, 0, 10 );
-   }
+   }      // TeleopInit()
 
 
       /*---------------------------------------------------------------------*/
@@ -1398,12 +1643,12 @@ leftMotorOutput = 0.0;
       }
 
       iCallCount++;
-   }
+   }      // TeleopPeriodic()
  
-};
+};      // class Robot definition (derives from frc::TimedRobot )
 
 
-Robot::sPowercellOnVideo Robot::powercellOnVideo = { true, 0, 0, -1, false };
+Robot::sPowercellOnVideo Robot::powercellOnVideo = { true, 0, 0, -1, false, false };
 
 #ifndef RUNNING_FRC_TESTS
 int main() { return frc::StartRobot<Robot>(); }
