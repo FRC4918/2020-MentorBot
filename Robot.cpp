@@ -921,8 +921,8 @@ leftMotorOutput = 0.0;
       if ( bInit || bReturnValue ) {
          startYaw = currentYaw;
          dDesiredSpeed = 0.01;
-	 cout << "TurnToHeading(): startYaw = " << startYaw;
-	 cout << " desiredYaw = " << desiredYaw << endl;
+         cout << "TurnToHeading(): startYaw = " << startYaw;
+         cout << " desiredYaw = " << desiredYaw << endl;
       }
         // calculate desired turn speed, with 100% if off by 50 degrees or more
       dDesiredTurn = ( currentYaw-desiredYaw ) * 1.0/50.0;
@@ -995,6 +995,8 @@ leftMotorOutput = 0.0;
       double      dDistanceDriven;    // distance driven in feet (floating pt.)
       double      dDesiredSpeed;  // -1.0 to +1.0, positive is forward
       double      dDesiredTurn;   // -1.0 to +1.0, positive is to the right
+      static int  iCallCount = 0;
+      iCallCount++;
 
           // If we've been told to initialize, or the last call returned
           // true (indicating that we finished the previous drive to distance).
@@ -1005,9 +1007,9 @@ leftMotorOutput = 0.0;
       iDistanceDriven =
                    ( ( sCurrState.iLSMasterPosition - iLSStartPosition ) +
                      ( sCurrState.iRSMasterPosition - iRSStartPosition ) ) / 2;
-              // Convert encoder ticks to feet, using the radius of the wheels,
-              // the number of ticks/revolution, and the number of inches/foot.
-      dDistanceDriven = iDistanceDriven * 3.1415 * 3.0 / 4096.0 / 12.0;
+            // Convert encoder ticks to feet, using the diameter of the wheels,
+            // the number of ticks/revolution, and the number of inches/foot.
+      dDistanceDriven = iDistanceDriven * 3.1415 * 8.0 / 4096.0 / 12.0;
                                          // if we haven't driven far enough yet
       if ( std::abs( dDistanceDriven ) < std::abs( desiredDistance ) ) {
          if ( 0.0 < desiredDistance ) {             // If we're driving forward
@@ -1045,8 +1047,16 @@ leftMotorOutput = 0.0;
          
          Team4918Drive( dDesiredSpeed, dDesiredTurn );
          bReturnValue = false;   // tell caller we are still driving
+         if ( 0 == iCallCount%25 ) {                        // Every 2 seconds
+            cout << "D2D(): curYaw/desYaw desTurn: " <<
+                    sCurrState.yawPitchRoll[0] << 
+                    "/" << desiredYaw << " " <<
+                    " " << dDesiredTurn << endl;
+         }
       } else {
          Team4918Drive( 0.0, 0.0 );   // stop the robot
+         m_motorLSMaster.SetIntegralAccumulator( 0.0 );
+         m_motorRSMaster.SetIntegralAccumulator( 0.0 );
          bReturnValue = true;    // tell caller we've reached desired distance
       }
 
@@ -1546,7 +1556,7 @@ leftMotorOutput = 0.0;
       LSMotorState.targetVelocity_UnitsPer100ms = 0;        // Left Side drive
       RSMotorState.targetVelocity_UnitsPer100ms = 0;        // Right Side drive
 
-      dDesiredYaw = sCurrState.initialYaw;
+      // dDesiredYaw = sCurrState.initialYaw;
 
       if (iCallCount<200) {
          if ( sCurrState.conButton[10]){
