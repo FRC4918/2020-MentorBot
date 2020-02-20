@@ -167,10 +167,10 @@ class Robot : public frc::TimedRobot {
                                           // this will be the pass-by reference
                                           // output of HoughCircles()
          /* HUE for YELLOW is 21-30.                                         */
-         /* Adjust Saturation and Value depending on the lighting condition  */
+         /* Adjust Hue depending on the lighting condition                   */
          /* of the environment as well as the surface of the object.         */
-      int     lowH = 21;       // Set Hue
-      int     highH = 46;      // (orig: 30)
+      int     lowH = 19;       // Set Hue
+      int     highH = 37;      // (orig: 30)  
 
       int     lowS = 0;        // Set Saturation (orig: 200)
       int     highS = 255;
@@ -246,8 +246,8 @@ class Robot : public frc::TimedRobot {
                                ", " << threshImg.rows / 2 - v3fCircles[i][1] <<
                                ")" << endl;
 
-                  std::cout << "Video Frame Cols/Rows: ";
-                  std::cout << hsvImg.cols << "/" << hsvImg.rows << endl;
+//                  std::cout << "Video Frame Cols/Rows: ";
+//                  std::cout << hsvImg.cols << "/" << hsvImg.rows << endl;
                   std::cout << "Center pixel H/S/V: ";
                                      // make a copy of the center pixel vector
                   cv::Vec3b pixel = hsvImg.at<cv::Vec3b>( hsvImg.rows/2,
@@ -1509,7 +1509,7 @@ leftMotorOutput = 0.0;
 
       SwitchCameraIfNecessary();
 
-      if ( 0 == iCallCount%100 ) {                           // every 2 seconds
+      if ( 0 == iCallCount%10000 ) {                           // every 200 seconds
          // cout << "Sonar0 sensor 0: " << distSensor0.GetAverageValue() << endl;
          // cout << "Sonar0 average voltage:  " << distSensor0.GetAverageVoltage()
          //      << endl;
